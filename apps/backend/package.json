@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/server.ts",
-    "worker:dev": "tsx watch src/worker.ts",
-    "migrate": "drizzle-kit migrate",
-    "generate": "drizzle-kit generate",
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "worker:dev": "tsx watch --env-file=../../.env src/worker.ts",
+    "migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
+    "generate": "dotenv -e ../../.env -- drizzle-kit generate",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },
@@ -23,7 +23,6 @@
     "@temporalio/worker": "^1.15.0",
     "@temporalio/workflow": "^1.15.0",
     "better-sqlite3": "^11.10.0",
-    "dotenv": "^16.6.1",
     "drizzle-orm": "^0.39.3",
     "fastify": "^5.7.4",
     "fastify-type-provider-zod": "^4.0.2",

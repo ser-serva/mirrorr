@@ -50,9 +50,6 @@ importers:
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
-      dotenv:
-        specifier: ^16.6.1
-        version: 16.6.1
       drizzle-orm:
         specifier: ^0.39.3
         version: 0.39.3(@types/better-sqlite3@7.6.13)(better-sqlite3@11.10.0)
@@ -1480,10 +1477,6 @@ packages:
 
   dotenv@16.0.3:
     resolution: {integrity: sha512-7GO6HghkA5fYG9TYnNxi14/7K9f5occMlp3zXAuSxn7CKCxt9xbNWG7yF8hTCSUchlfWSe3uLmlPfigevRItzQ==}
-    engines: {node: '>=12'}
-
-  dotenv@16.6.1:
-    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
 
   drizzle-kit@0.30.6:
@@ -4141,8 +4134,6 @@ snapshots:
       esutils: 2.0.3
 
   dotenv@16.0.3: {}
-
-  dotenv@16.6.1: {}
 
   drizzle-kit@0.30.6:
     dependencies:

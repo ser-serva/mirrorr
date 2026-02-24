@@ -1,0 +1,62 @@
+# Mirrorr — dev infrastructure
+# Runs: Temporal server (SQLite-backed) + Temporal UI
+#
+# Backend + worker run on the HOST via `pnpm dev` / `pnpm worker:dev`
+# so they can use tsx hot-reload and reach Temporal on localhost:7233.
+# Frontend Vite dev server also runs on the host.
+#
+# Usage:
+#   docker compose -f infra/dev/compose.yaml up -d
+#   pnpm --filter backend dev       # Fastify API (port 4001)
+#   pnpm --filter backend worker:dev # Temporal worker
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    container_name: mirrorr_postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.29.3
+    container_name: mirrorr_temporal
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  temporal-ui:
+    image: temporalio/ui:2.45.4
+    container_name: mirrorr_temporal_ui
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:5173,http://localhost:4001
+    depends_on:
+      - temporal
+
+volumes:
+  postgres_data:
