@@ -37,6 +37,7 @@ export interface UploadOptions {
 
 export interface UploadResult {
   postId: string;
+  postUrl?: string;
 }
 
 // ─── Source Adapter ───────────────────────────────────────────────────────────

@@ -5,15 +5,37 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "dev": "tsx watch src/server.ts",
+    "worker:dev": "tsx watch src/worker.ts",
+    "migrate": "drizzle-kit migrate",
+    "generate": "drizzle-kit generate",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@mirrorr/shared": "workspace:*"
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/secure-session": "^8.3.0",
+    "@fastify/static": "^8.3.0",
+    "@mirrorr/adapter-core": "workspace:*",
+    "@mirrorr/shared": "workspace:*",
+    "@temporalio/activity": "^1.15.0",
+    "@temporalio/client": "^1.15.0",
+    "@temporalio/worker": "^1.15.0",
+    "@temporalio/workflow": "^1.15.0",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.39.3",
+    "fastify": "^5.7.4",
+    "fastify-type-provider-zod": "^4.0.2",
+    "nanoid": "^5.1.6",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.19.11",
+    "drizzle-kit": "^0.30.6",
+    "tsx": "^4.21.0",
     "typescript": "5.9.2"
   }
 }
