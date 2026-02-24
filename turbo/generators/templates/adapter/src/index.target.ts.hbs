@@ -1,0 +1,16 @@
+import type { TargetAdapter, TargetConfig, UploadOptions, UploadResult } from '@mirrorr/adapter-core';
+import { AdapterNotImplementedError } from '@mirrorr/adapter-core';
+
+export class {{ pascalCase name }}Adapter implements TargetAdapter {
+  async upload(
+    config: TargetConfig,
+    options: UploadOptions,
+    filePath: string
+  ): Promise<UploadResult> {
+    throw new AdapterNotImplementedError('{{ pascalCase name }}Adapter', 'upload');
+  }
+
+  async test(config: TargetConfig): Promise<{ ok: boolean; message?: string }> {
+    throw new AdapterNotImplementedError('{{ pascalCase name }}Adapter', 'test');
+  }
+}

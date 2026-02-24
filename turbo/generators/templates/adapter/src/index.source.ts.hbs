@@ -1,0 +1,21 @@
+import type {
+  SourceAdapter,
+  DiscoveryContext,
+  DiscoveryResult,
+  VideoMetadata,
+} from '@mirrorr/adapter-core';
+import { AdapterNotImplementedError } from '@mirrorr/adapter-core';
+
+export class {{ pascalCase name }}Adapter implements SourceAdapter {
+  async discover(config: unknown, ctx: DiscoveryContext): Promise<DiscoveryResult> {
+    throw new AdapterNotImplementedError('{{ pascalCase name }}Adapter', 'discover');
+  }
+
+  async download(config: unknown, url: string, destDir: string): Promise<string> {
+    throw new AdapterNotImplementedError('{{ pascalCase name }}Adapter', 'download');
+  }
+
+  async fetchMeta(config: unknown, url: string): Promise<VideoMetadata> {
+    throw new AdapterNotImplementedError('{{ pascalCase name }}Adapter', 'fetchMeta');
+  }
+}

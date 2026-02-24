@@ -18,6 +18,67 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  apps/backend:
+    dependencies:
+      '@mirrorr/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  apps/frontend:
+    dependencies:
+      '@mirrorr/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/adapter-core:
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/adapter-loops:
+    dependencies:
+      '@mirrorr/adapter-core':
+        specifier: workspace:*
+        version: link:../adapter-core
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/adapter-tiktok:
+    dependencies:
+      '@mirrorr/adapter-core':
+        specifier: workspace:*
+        version: link:../adapter-core
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/eslint-config:
     devDependencies:
       '@eslint/js':
@@ -53,6 +114,15 @@ importers:
       typescript-eslint:
         specifier: ^8.56.1
         version: 8.56.1(eslint@9.39.3)(typescript@5.9.3)
+
+  packages/shared:
+    devDependencies:
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
 
   packages/typescript-config: {}
 
