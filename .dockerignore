@@ -1,0 +1,49 @@
+# Mirrorr — Docker build ignore list
+# Prevents large/unnecessary files from being sent to the Docker build context
+
+# Build outputs (copied selectively in Dockerfile stages)
+**/dist
+**/.turbo
+**/.next
+**/coverage
+
+# Dev data — never include in image
+data/
+infra/dev/
+infra/prod/.env
+
+# Dependencies — rebuilt in Docker stages
+**/node_modules
+
+# Dev environment files
+infra/dev/.env
+infra/dev/.env.*
+!infra/dev/.env.example
+infra/prod/.env
+!infra/prod/.env.example
+
+# Logs and temp files
+**/*.log
+**/*.log.*
+tmp/
+
+# VCS and tooling
+.git
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Docs and tests (not needed at runtime)
+docs/
+**/tests/
+**/coverage/
+**/vitest.config.*
+**/*.test.ts
+**/*.spec.ts
+
+# Misc
+README.md
+CONTRIBUTING.md
+DISCLAIMER.md
+ROADMAP.md
