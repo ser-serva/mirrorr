@@ -30,6 +30,14 @@ COPY packages/eslint-config/package.json     packages/eslint-config/package.json
 COPY packages/typescript-config/package.json packages/typescript-config/package.json
 # Production deps only (skip devDependencies for final stages)
 RUN pnpm install --frozen-lockfile --prod
+# Ensure per-package node_modules dirs exist even when the package has no
+# external deps of its own (pnpm won't create them, but COPY --from=deps needs
+# a path to exist or the build fails with "not found").
+RUN mkdir -p \
+      packages/shared/node_modules \
+      packages/adapter-core/node_modules \
+      packages/adapter-tiktok/node_modules \
+      packages/adapter-loops/node_modules
 
 # ── Stage 3: build ────────────────────────────────────────────────────────────
 # Need devDependencies (tsc, vite, tsx) — separate install then build
