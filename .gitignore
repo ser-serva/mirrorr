@@ -27,6 +27,12 @@ out/
 build
 dist
 
+# SQLite (local dev DB — never commit)
+*.db
+*.db-shm
+*.db-wal
+apps/backend/data/
+
 
 # Debug
 npm-debug.log*
