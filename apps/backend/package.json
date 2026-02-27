@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch --env-file=../../.env src/server.ts",
-    "worker:dev": "tsx watch --env-file=../../.env src/worker.ts",
-    "migrate": "dotenv -e ../../.env -- drizzle-kit migrate",
-    "generate": "dotenv -e ../../.env -- drizzle-kit generate",
+    "dev": "tsx watch --env-file=../../infra/dev/.env src/server.ts",
+    "worker:dev": "tsx watch --env-file=../../infra/dev/.env src/worker.ts",
+    "migrate": "dotenv -e ../../infra/dev/.env -- drizzle-kit migrate",
+    "generate": "dotenv -e ../../infra/dev/.env -- drizzle-kit generate",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },
