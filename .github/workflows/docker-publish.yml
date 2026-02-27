@@ -1,0 +1,156 @@
+# Mirrorr — Docker image build and publish
+#
+# On pull requests: builds both image targets but does NOT push (CI validation).
+# On semver tag push (v*.*.*): builds and pushes to ghcr.io.
+#   - Stable tags (vX.Y.Z)       → :X.Y.Z + :X.Y + :X + :latest
+#   - Pre-release (vX.Y.Z-beta)  → :X.Y.Z-beta only (never updates :latest)
+#
+# Images published:
+#   ghcr.io/ser-serva/mirrorr-app:{tag}
+#   ghcr.io/ser-serva/mirrorr-worker:{tag}
+#
+# Registry auth: uses GITHUB_TOKEN automatically — no secrets needed.
+
+name: Docker Build & Publish
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+**'   # v1.0.0, v1.0.0-beta.1, etc.
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  # IMAGE_OWNER resolves to the GitHub org/user that owns this repo —
+  # works under vineethsoma/mirrorr today and ser-serva/mirrorr once transferred.
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  # ── Build validation (always runs, never pushes) ──────────────────────────
+  build-test:
+    name: Build (no push)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build app target (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          push: false
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Build worker target (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: false
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+  # ── Publish app image ──────────────────────────────────────────────────────
+  publish-app:
+    name: Publish mirrorr-app
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (app)
+        id: meta-app
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app
+          tags: |
+            # vX.Y.Z → X.Y.Z, X.Y, X, latest (stable semver only)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push mirrorr-app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+  # ── Publish worker image ───────────────────────────────────────────────────
+  publish-worker:
+    name: Publish mirrorr-worker
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (worker)
+        id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push mirrorr-worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
