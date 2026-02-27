@@ -1,0 +1,182 @@
+# Mirrorr — Pre-production (QA) infrastructure
+#
+# Runs the real GHCR alpha images end-to-end against a live Loops instance.
+# Gluetun routes yt-dlp traffic through WireGuard so host IP is never exposed.
+# Temporal UI is included for QA observability.
+#
+# Ports (chosen not to clash with dev stack on the same machine):
+#   4002  — Mirrorr API
+#   8082  — Temporal UI
+#
+# Usage:
+#   1. cp infra/preprod/.env.example infra/preprod/.env  (fill in secrets)
+#   2. docker compose -f infra/preprod/compose.yaml pull
+#   3. docker compose -f infra/preprod/compose.yaml up -d
+#   4. Open http://localhost:4002/documentation  (Swagger UI)
+#      Open http://localhost:8082               (Temporal UI)
+#
+# To test a specific image tag:
+#   IMAGE_TAG=v0.1.0-alpha.2 docker compose -f infra/preprod/compose.yaml up -d
+#
+# To tear down and wipe data:
+#   docker compose -f infra/preprod/compose.yaml down -v
+
+name: mirrorr-preprod
+
+services:
+
+  # ── Temporal backing store ──────────────────────────────────────────────────
+  postgresql:
+    image: postgres:16-alpine
+    container_name: mirrorr_preprod_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Temporal server ─────────────────────────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.29.3
+    container_name: mirrorr_preprod_temporal
+    restart: unless-stopped
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+    networks:
+      - internal
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address $(hostname -i | awk '{print $1}'):7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # ── Temporal UI (QA observability) ──────────────────────────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.45.4
+    container_name: mirrorr_preprod_temporal_ui
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    networks:
+      - internal
+    depends_on:
+      - temporal
+
+  # ── Gluetun VPN gateway ─────────────────────────────────────────────────────
+  # All yt-dlp download traffic routes through this WireGuard tunnel.
+  # Host IP is never exposed to TikTok during discovery or download.
+  # WireGuard config (keys, addresses) comes entirely from .env.
+  # FIREWALL_OUTBOUND_SUBNETS allows the worker→temporal/postgres traffic to
+  # bypass the VPN while external (TikTok) traffic is tunnelled.
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: mirrorr_preprod_gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - .env
+    environment:
+      FIREWALL_OUTBOUND_SUBNETS: 172.32.0.0/24,172.17.0.0/16
+      HEALTH_VPN_DURATION_INITIAL: 120s
+      HTTPPROXY: "on"
+      HTTPPROXY_LOG: "off"
+    networks:
+      - internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ping -c 1 www.google.com || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── API server ──────────────────────────────────────────────────────────────
+  app:
+    image: ghcr.io/ser-serva/mirrorr-app:${IMAGE_TAG:-alpha}
+    container_name: mirrorr_preprod_app
+    restart: unless-stopped
+    ports:
+      - "4002:4001"
+    environment:
+      - NODE_ENV=production
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_UI_URL=http://localhost:8082
+    env_file:
+      - .env
+    volumes:
+      - data:/data
+    networks:
+      - internal
+    depends_on:
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Temporal worker ─────────────────────────────────────────────────────────
+  # No GPU in preprod — ffmpeg falls back to software (cpu) encoding.
+  worker:
+    image: ghcr.io/ser-serva/mirrorr-worker:${IMAGE_TAG:-alpha}
+    container_name: mirrorr_preprod_worker
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - TEMPORAL_ADDRESS=temporal:7233
+      # Route yt-dlp subprocess calls through Gluetun HTTP proxy.
+      # HTTP_PROXY / HTTPS_PROXY ensure any other outbound HTTP (fetch, axios, etc.)
+      # also routes through the VPN — guards against accidental IP leaks.
+      # NO_PROXY excludes internal Docker service names from the proxy.
+      - YTDLP_PROXY=http://gluetun:8888
+      - HTTP_PROXY=http://gluetun:8888
+      - HTTPS_PROXY=http://gluetun:8888
+      - NO_PROXY=temporal,postgresql,localhost,127.0.0.1
+    env_file:
+      - .env
+    volumes:
+      - data:/data
+    networks:
+      - internal
+    depends_on:
+      temporal:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+
+# ── Networks ────────────────────────────────────────────────────────────────
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.32.0.0/24  # referenced in gluetun FIREWALL_OUTBOUND_SUBNETS
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  data:          # Shared app+worker: SQLite DB, cookies, downloads, transcodes

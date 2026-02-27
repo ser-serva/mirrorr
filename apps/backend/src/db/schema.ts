@@ -64,12 +64,13 @@ export const creators = sqliteTable('creators', {
   sourceId:         integer('source_id').notNull().references(() => sources.id),
   targetId:         integer('target_id').notNull().references(() => targets.id),
   enabled:          integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  pollIntervalMs:   integer('poll_interval_ms'),
-  maxBacklog:       integer('max_backlog'),
-  lastPolledAt:     integer('last_polled_at', { mode: 'timestamp' }),
-  lastDiscoveredAt: integer('last_discovered_at', { mode: 'timestamp' }),
-  lastPollError:    text('last_poll_error'),
-  lastPollErrorAt:  integer('last_poll_error_at', { mode: 'timestamp' }),
+  pollIntervalMs:           integer('poll_interval_ms'),
+  maxBacklog:               integer('max_backlog'),
+  initialSyncWindowDays:    integer('initial_sync_window_days').default(3),
+  lastPolledAt:             integer('last_polled_at', { mode: 'timestamp' }),
+  lastDiscoveredAt:         integer('last_discovered_at', { mode: 'timestamp' }),
+  lastPollError:            text('last_poll_error'),
+  lastPollErrorAt:          integer('last_poll_error_at', { mode: 'timestamp' }),
 }, (t) => [
   uniqueIndex('creators_handle_source_idx').on(t.handle, t.sourceId),
 ]);
@@ -78,7 +79,7 @@ export const videos = sqliteTable('videos', {
   id:                  integer('id').primaryKey({ autoIncrement: true }),
   creatorId:           integer('creator_id').notNull().references(() => creators.id, { onDelete: 'cascade' }),
   targetId:            integer('target_id').references(() => targets.id),
-  sourceVideoId:       text('source_video_id').notNull().unique(),
+  sourceVideoId:       text('source_video_id').notNull(),
   sourceVideoUrl:      text('source_video_url').notNull(),
   title:               text('title'),
   description:         text('description'),
@@ -96,7 +97,10 @@ export const videos = sqliteTable('videos', {
   targetPostId:        text('target_post_id'),
   targetPostUrl:       text('target_post_url'),
   temporalWorkflowId:  text('temporal_workflow_id'),
-});
+}, (t) => [
+  // Per-creator deduplication: same video ID may appear for different creators
+  uniqueIndex('videos_source_video_creator_idx').on(t.sourceVideoId, t.creatorId),
+]);
 
 export const settings = sqliteTable('settings', {
   id:               integer('id').primaryKey(),           // always 1

@@ -143,6 +143,7 @@ Tracked creator accounts.
 | `lastPolledAt` / `lastDiscoveredAt` | timestamp | Audit timestamps |
 | `lastPollError` | text | Last discovery error message (from Temporal activity failure) |
 | `lastPollErrorAt` | timestamp | When the last poll error occurred |
+| `initialSyncWindowDays` | integer \| null | If set and the creator has never been polled (`lastPolledAt IS NULL`), only videos published within the last N days are inserted on first discovery — avoids flooding the pipeline with a full historical backlog |
 
 > To mirror a creator to a dedicated account: use `POST /api/creators/:handle/provision-mirror` which calls the target adapter's `provisionMirrorAccount()`, creates a new `targets` row with `isMirror=1`, and updates `creator.targetId` to the new target. The creator then has one `targetId` — whether it points to a shared or mirror account is a property of the target row, not the creator.
 
@@ -153,7 +154,7 @@ One row per discovered video. Stage is denormalized from Temporal for fast SQL q
 |---|---|---|
 | `id` | integer PK | |
 | `creatorId` | integer FK → `creators` | Cascades on delete |
-| `sourceVideoId` | text unique | Platform video ID |
+| `sourceVideoId` | text | Platform video ID — unique *per creator* (composite unique index `videos_source_video_creator_idx` on `(source_video_id, creator_id)`) |
 | `sourceVideoUrl` | text | Canonical source URL |
 | `title` / `description` / `hashtags` | text | Metadata; `hashtags` = JSON array |
 | `thumbnailUrl` | text \| null | Thumbnail URL from source metadata — nullable (yt-dlp may omit it) |
@@ -274,11 +275,18 @@ The backend, workflows, and activities require zero changes.
 All async pipeline work is orchestrated through Temporal. The backend registers a single Temporal worker that handles both workflows and activities.
 
 ```
-creatorDiscoveryWorkflow (scheduled)
+[Temporal Schedule: discover-all-creators]
+    │  fires every POLL_INTERVAL_MS
+    ▼
+discoverAllCreatorsWorkflow (coordinator)
     │
-    └─► discoverCreatorVideos (activity)
-            │ inserts new video rows
-            └─► startChild videoPipelineWorkflow per new video
+    ├─► getEnabledCreatorIds (activity) → [id1, id2, ...]
+    │
+    └─► startChild discoverCreatorWorkflow x N  (fan-out)
+              │ Promise.allSettled — one failure never blocks others
+              └─► discoverCreatorVideos (activity)
+                      │ inserts new video rows
+                      └─► client.workflow.start videoPipelineWorkflow per new video
 
 videoPipelineWorkflow (workflowId: "video-{id}")
     │
@@ -292,15 +300,24 @@ videoPipelineWorkflow (workflowId: "video-{id}")
     └─► updateVideoStage(UPLOAD_SUCCEEDED)
 ```
 
-### 7.1 `creatorDiscoveryWorkflow`
+### 7.1 `discoverAllCreatorsWorkflow` (coordinator)
 
-- **Triggered by:** Temporal Schedule (one per creator, keyed `discover-{handle}`)
+- **Triggered by:** Single global Temporal Schedule `discover-all-creators` registered at startup in `src/index.ts`. `ScheduleOverlapPolicy.SKIP` ensures no concurrent runs.
+- **Schedule registration** (`registerDiscoverySchedule()` in `src/index.ts`):
+  - Uses `workflowType: 'discoverAllCreatorsWorkflow'` **string** (not an import) to avoid worker sandbox import restrictions.
+  - Idempotent — catches gRPC code 5 (`ALREADY_EXISTS`) and continues silently.
 - **Actions:**
-  1. Calls `discoverCreatorVideos` activity
-  2. Inserts new `videos` rows at `DOWNLOAD_QUEUED`
-  3. Starts a child `videoPipelineWorkflow` per new video (idempotent — duplicate `workflowId` starts are no-ops)
-  4. Updates `creator.lastPolledAt` / `lastDiscoveredAt` and clears `lastPollError`
-  5. On failure: writes error message to `creator.lastPollError` + `lastPollErrorAt`
+  1. Calls `getEnabledCreatorIds()` to get all enabled creator IDs.
+  2. Fans out one `discoverCreatorWorkflow` child per ID via `startChild()`.
+  3. Waits for all children via `Promise.allSettled()` — per-child failures are logged but do not abort the batch (SC-004).
+
+### 7.1.1 `discoverCreatorWorkflow` (leaf)
+
+- **Input:** `{ creatorId: number }`
+- **Retry policy:** `maximumAttempts: 3`, `startToCloseTimeout: 30s`
+- **Actions:**
+  1. Calls `discoverCreatorVideos(creatorId)` activity.
+  2. Returns `{ queued: number, alreadyKnown: number }` to parent.
 
 ### 7.2 `videoPipelineWorkflow`
 
@@ -317,12 +334,13 @@ videoPipelineWorkflow (workflowId: "video-{id}")
 
 | Activity | Description |
 |---|---|
-| `discoverCreatorVideos` | Polls creator feed via source adapter; inserts new video rows |
+| `getEnabledCreatorIds` | Returns all `creators.id` where `enabled = true` — used by the coordinator workflow |
+| `discoverCreatorVideos` | Loads creator + source config, calls source adapter, applies `initialSyncWindowDays` filter on first discovery, inserts new `videos` rows with `onConflictDoNothing()`, starts `videoPipelineWorkflow` per new video (best-effort), updates `lastPolledAt`/`lastDiscoveredAt`, emits `creator:update` + `stats:update` SSE events; on error writes `lastPollError` + emits `creator:update` |
 | `downloadVideo` | Downloads video via source adapter yt-dlp to `/data/downloads/` |
 | `transcodeVideo` | FFmpeg probe + optional NVENC encode to `/data/transcodes/` |
 | `uploadVideo` | Decrypts API token + calls target adapter upload; writes `targetPostId` + `targetPostUrl` |
 | `cleanupArtifacts` | Deletes local download and transcode files after successful upload |
-| `updateVideoStage` | Writes denormalized stage to `videos.stage` in SQLite |
+| `updateVideoStage` | Writes denormalized stage to `videos.stage` in SQLite; emits `video:update` SSE event |
 
 Activities contain no retry logic — that is entirely declared in the workflow's `proxyActivities` retry policy.
 
@@ -360,25 +378,29 @@ All endpoints under `/api/*` require an authenticated admin session (cookie). Au
 | `POST /api/targets/:id/test` | Test connectivity → `{ ok, latencyMs, testedAt }`; persists `lastTestedAt` + `lastTestOk` on target row |
 | `PATCH /api/targets/:id` | Update target settings |
 | `DELETE /api/targets/:id` | Delete target |
-| `GET /api/events` | SSE stream — push state change events to the dashboard |
+| `GET /api/events` | SSE stream — push state change events to the dashboard (`?creatorId=<id>&event=<type>`) |
+| `POST /api/discovery/pause` | Pause the global discovery schedule (idempotent) |
+| `POST /api/discovery/resume` | Resume the global discovery schedule (idempotent) |
+| `GET /api/discovery/status` | Returns `{ paused: boolean, scheduleId }` for the global schedule |
 
 ### 8.1 Real-time Updates (Server-Sent Events)
 
 The management console requires live updates without constant polling. The pattern is:
 
-1. **Activities write stage changes** to SQLite via `updateVideoStage`, then emit to a module-level `EventEmitter`.
-2. **`GET /api/events`** subscribes to that emitter and streams events over a persistent `text/event-stream` connection.
+1. **Activities write stage changes** to SQLite via `updateVideoStage`, then emit to the `sseBus` singleton.
+2. **`GET /api/events`** subscribes to that emitter via `createSseFilter()` and streams events over a persistent `text/event-stream` connection.
 3. **The frontend** opens one `EventSource` connection on load; React state updates on each received event.
 
 ```
 Activity (worker process)
   → writes videos.stage to SQLite
-  → emits event to in-process EventEmitter
+  → emits { name, payload } to sseBus (module-level SseBus extends EventEmitter)
 
 GET /api/events (Fastify route)
-  → subscribes to EventEmitter
-  → streams named events as text/event-stream
-  → cleans up listener on client disconnect
+  → createSseFilter({ creatorId?, event? }) — returns a filter fn
+  → subscribes to sseBus; applies filter before forwarding to client
+  → reply.hijack() takes over raw socket; writes text/event-stream format
+  → removes listener on client disconnect ('close' event)
 
 Frontend EventSource
   → listens for named events
@@ -386,13 +408,19 @@ Frontend EventSource
   → auto-reconnects on drop
 ```
 
+**SSE Bus implementation** (`src/lib/sse-bus.ts`):
+- `SseBus extends EventEmitter` — module-level singleton; `setMaxListeners(500)` to support many concurrent dashboard clients.
+- `emitSseEvent(name, payload)` — typed helper called from activities and route handlers.
+- `createSseFilter({ creatorId?, event? })` — exported from `src/routes/events.routes.ts`; returns a predicate function. `event` filters by event type for all events; `creatorId` applies only to `video:update` and `creator:update` (not `stats:update` or `discovery:status` which are global).
+
 **Named event types:**
 
 | Event | Payload | Trigger |
 |---|---|---|
 | `video:update` | `{ id, stage, stageUpdatedAt }` | Any stage transition |
-| `creator:update` | `{ id, lastPolledAt, lastPollError? }` | Poll completion or failure |
-| `stats:update` | `{ videos: { byStage }, lastDiscoveredAt }` | After discovery runs |
+| `creator:update` | `{ id, lastPolledAt, lastDiscoveredAt?, lastPollError? }` | Poll completion or failure |
+| `stats:update` | `{ totalVideos, byStage }` | After discovery runs |
+| `discovery:status` | `{ paused: boolean, scheduleId }` | After pause/resume via `/api/discovery/*` |
 
 SSE requires no additional dependencies — `reply.raw` (Node `http.ServerResponse`) handles `text/event-stream` natively in Fastify.
 

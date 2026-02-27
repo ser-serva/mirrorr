@@ -61,7 +61,7 @@ services:
       postgresql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      test: ["CMD-SHELL", "temporal operator cluster health --address $(hostname -i | awk '{print $1}'):7233"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -134,8 +134,14 @@ services:
     environment:
       - NODE_ENV=production
       - TEMPORAL_ADDRESS=temporal:7233
-      # Route yt-dlp subprocess calls through Gluetun HTTP proxy
+      # Route yt-dlp subprocess calls through Gluetun HTTP proxy.
+      # HTTP_PROXY / HTTPS_PROXY ensure any other outbound HTTP (fetch, axios, etc.)
+      # also routes through the VPN — guards against accidental IP leaks.
+      # NO_PROXY excludes internal Docker service names from the proxy.
       - YTDLP_PROXY=http://gluetun:8888
+      - HTTP_PROXY=http://gluetun:8888
+      - HTTPS_PROXY=http://gluetun:8888
+      - NO_PROXY=temporal,postgresql,localhost,127.0.0.1
     env_file:
       - .env
     volumes:

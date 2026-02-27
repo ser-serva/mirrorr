@@ -15,7 +15,12 @@ async function main() {
     connection,
     namespace: env.TEMPORAL_NAMESPACE,
     taskQueue: env.TEMPORAL_TASK_QUEUE,
-    workflowsPath: resolve(__dirname, './workflows/video-pipeline.workflow.ts'),
+    // Barrel file exports: videoPipelineWorkflow, discoverCreatorWorkflow,
+    // discoverAllCreatorsWorkflow — all registered from one entry point
+    workflowsPath: resolve(__dirname, './workflows/index.ts'),
+    // All pipeline activities including new discovery activities:
+    // updateVideoStage, downloadVideo, transcodeVideo, uploadVideo,
+    // cleanupArtifacts, archiveVideo, discoverCreatorVideos, getEnabledCreatorIds
     activities,
     maxConcurrentActivityTaskExecutions:
       env.DOWNLOAD_CONCURRENCY + env.UPLOAD_CONCURRENCY,

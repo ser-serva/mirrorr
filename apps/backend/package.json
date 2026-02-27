@@ -9,13 +9,20 @@
     "worker:dev": "tsx watch --env-file=../../infra/dev/.env src/worker.ts",
     "migrate": "dotenv -e ../../infra/dev/.env -- drizzle-kit migrate",
     "generate": "dotenv -e ../../infra/dev/.env -- drizzle-kit generate",
+    "db:generate": "dotenv -e ../../infra/dev/.env -- drizzle-kit generate",
+    "db:migrate": "dotenv -e ../../infra/dev/.env -- drizzle-kit migrate",
     "lint": "eslint . --max-warnings 0",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
     "@fastify/secure-session": "^8.3.0",
     "@fastify/static": "^8.3.0",
+    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger-ui": "^5.2.5",
     "@mirrorr/adapter-core": "workspace:*",
     "@mirrorr/shared": "workspace:*",
     "@temporalio/activity": "^1.15.0",
@@ -31,10 +38,15 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
+    "@temporalio/testing": "^1.15.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.11",
+    "@types/supertest": "^7.2.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "drizzle-kit": "^0.30.6",
+    "supertest": "^7.2.2",
     "tsx": "^4.21.0",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "^4.0.18"
   }
 }
