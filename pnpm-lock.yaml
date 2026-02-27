@@ -38,6 +38,9 @@ importers:
       '@mirrorr/adapter-core':
         specifier: workspace:*
         version: link:../../packages/adapter-core
+      '@mirrorr/adapter-tiktok':
+        specifier: workspace:*
+        version: link:../../packages/adapter-tiktok
       '@mirrorr/shared':
         specifier: workspace:*
         version: link:../../packages/shared

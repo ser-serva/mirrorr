@@ -22,19 +22,19 @@ interface SseBusEvents {
 class SseBus extends EventEmitter {
   override emit(event: typeof BUS_EVENT, name: SseEventName, payload: SseEventPayload): boolean;
   override emit(event: string, ...args: unknown[]): boolean;
-  override emit(event: string, ...args: unknown[]): boolean {
+  override emit(event: string, ...args: any[]): boolean {
     return super.emit(event, ...args);
   }
 
   override on(event: typeof BUS_EVENT, listener: SseBusEvents[typeof BUS_EVENT]): this;
-  override on(event: string, listener: (...args: unknown[]) => void): this;
-  override on(event: string, listener: (...args: unknown[]) => void): this {
+  override on(event: string, listener: (...args: any[]) => void): this;
+  override on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 
   override off(event: typeof BUS_EVENT, listener: SseBusEvents[typeof BUS_EVENT]): this;
-  override off(event: string, listener: (...args: unknown[]) => void): this;
-  override off(event: string, listener: (...args: unknown[]) => void): this {
+  override off(event: string, listener: (...args: any[]) => void): this;
+  override off(event: string, listener: (...args: any[]) => void): this {
     return super.off(event, listener);
   }
 }

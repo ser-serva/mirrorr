@@ -151,10 +151,11 @@ export async function discoverCreatorVideos(
 
     // ── Count prior videos (for first-run detection) ───────────────────────
 
-    const [{ value: existingCount }] = await db
+    const [countRow] = await db
       .select({ value: count() })
       .from(schema.videos)
       .where(eq(schema.videos.creatorId, creatorId));
+    const existingCount = countRow?.value ?? 0;
 
     // ── Discover ───────────────────────────────────────────────────────────
 

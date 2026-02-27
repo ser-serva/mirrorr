@@ -37,7 +37,7 @@ export const sources = sqliteTable('sources', {
   id:      integer('id').primaryKey({ autoIncrement: true }),
   name:    text('name').notNull(),
   type:    text('type', { enum: ['tiktok', 'instagram', 'youtube_shorts'] }).notNull(),
-  config:  text('config', { mode: 'json' }).$type<TikTokSourceConfig>().notNull().default('{}'),
+  config:  text('config', { mode: 'json' }).$type<TikTokSourceConfig>().notNull().default({}),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
 });
 
@@ -50,8 +50,8 @@ export const targets = sqliteTable('targets', {
   publicationConfig: text('publication_config', { mode: 'json' })
                        .$type<{ titleTemplate?: string; descriptionTemplate?: string }>()
                        .notNull()
-                       .default('{}'),
-  config:            text('config', { mode: 'json' }).$type<LoopsTargetConfig>().notNull().default('{}'),
+                       .default({}),
+  config:            text('config', { mode: 'json' }).$type<LoopsTargetConfig>().notNull().default({}),
   isMirror:          integer('is_mirror', { mode: 'boolean' }).notNull().default(false),
   enabled:           integer('enabled', { mode: 'boolean' }).notNull().default(true),
   lastTestedAt:      integer('last_tested_at', { mode: 'timestamp' }),
@@ -83,7 +83,7 @@ export const videos = sqliteTable('videos', {
   sourceVideoUrl:      text('source_video_url').notNull(),
   title:               text('title'),
   description:         text('description'),
-  hashtags:            text('hashtags', { mode: 'json' }).$type<string[]>().default('[]'),
+  hashtags:            text('hashtags', { mode: 'json' }).$type<string[]>().default([]),
   thumbnailUrl:        text('thumbnail_url'),
   sourcePubAt:         integer('source_pub_at', { mode: 'timestamp' }),
   durationSecs:        integer('duration_secs'),

@@ -30,11 +30,13 @@ export function createTestDb() {
     migrationsFolder: resolve(__dirname, '../../src/db/migrations'),
   });
 
-  return { db, sqlite };
+  // Return close as a function to hide BetterSqlite3.Database from the inferred
+  // return type (prevents TS4058 "cannot be named" errors in declaration files).
+  return { db, close: () => sqlite.close() };
 }
 
 export async function buildTestApp() {
-  const { db, sqlite } = createTestDb();
+  const { db, close: closeDb } = createTestDb();
   const app = await buildServer(db as any);
   await app.ready();
 
@@ -43,7 +45,7 @@ export async function buildTestApp() {
     db,
     close: async () => {
       await app.close();
-      sqlite.close();
+      closeDb();
     },
   };
 }
@@ -55,7 +57,7 @@ export async function buildTestApp() {
 export async function seedSourceAndTarget(db: ReturnType<typeof createTestDb>['db']) {
   const [source] = await db
     .insert(schema.sources)
-    .values({ name: 'TikTok', type: 'tiktok', config: '{}', enabled: true })
+    .values({ name: 'TikTok', type: 'tiktok', config: {}, enabled: true })
     .returning({ id: schema.sources.id });
 
   const [target] = await db
@@ -65,8 +67,8 @@ export async function seedSourceAndTarget(db: ReturnType<typeof createTestDb>['d
       type: 'loops',
       url: 'http://localhost:8085',
       apiTokenEnc: 'test-token-enc',
-      publicationConfig: '{}',
-      config: '{}',
+      publicationConfig: {},
+      config: {},
       isMirror: false,
       enabled: true,
     })
