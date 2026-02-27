@@ -54,11 +54,15 @@ export const discoveryPlugin: FastifyPluginAsync = async (fastify) => {
       // SDK v1.15: describe() returns { state, info, ... } directly — not desc.schedule.state
       const paused = (desc as unknown as { state?: { paused?: boolean } }).state?.paused ?? false;
       const nextActionTime = desc.info.nextActionTimes?.[0];
-      const nextRunAt = nextActionTime
-        ? nextActionTime instanceof Date
-          ? nextActionTime.toISOString()
-          : String(nextActionTime)
-        : null;
+      // When paused, Temporal still reports nextActionTimes but the schedule won't fire.
+      // Return null to match spec: { paused: true, nextRunAt: null }.
+      const nextRunAt = paused
+        ? null
+        : nextActionTime
+          ? nextActionTime instanceof Date
+            ? nextActionTime.toISOString()
+            : String(nextActionTime)
+          : null;
       return reply.send({ paused, nextRunAt, status: 'registered' });
     } catch (err: unknown) {
       if (isScheduleNotFoundError(err)) {
