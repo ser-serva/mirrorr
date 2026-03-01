@@ -69,33 +69,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Gate: fails the job on any unfixed CRITICAL or HIGH finding.
-      # Runs first so a failure gives a clear table output in the job log.
-      # scanners: vuln only — secret scanning is handled by the Gitleaks job above.
-      - name: Scan (table — PR gate)
-        uses: aquasecurity/trivy-action@0.30.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
+      # Install Trivy via official install script (more reliable than the action
+      # binary downloader which can hit GitHub API rate limits in CI).
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.60.0
 
-      # Reporting: produce SARIF regardless of the gate result above
-      # so the Security tab always has up-to-date findings.
+      # Gate: fails the job on any unfixed CRITICAL or HIGH finding.
+      # secret scanner omitted — Gitleaks handles secrets above.
+      - name: Scan (table — PR gate)
+        run: |
+          trivy fs . \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --skip-dirs node_modules \
+            --format table
+
+      # Reporting: produce SARIF for the Security tab (never gates the job).
       - name: Scan (SARIF — Security tab)
         if: always()
-        uses: aquasecurity/trivy-action@0.30.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          format: sarif
-          output: trivy-fs.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '0'
+        run: |
+          trivy fs . \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --skip-dirs node_modules \
+            --format sarif \
+            --output trivy-fs.sarif
 
       - name: Upload SARIF
         if: always()
