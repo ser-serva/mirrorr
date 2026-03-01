@@ -4,12 +4,13 @@
 #
 #   gitleaks   — scans commit history for accidentally committed secrets
 #   audit      — pnpm audit, fails on HIGH or above
-#   trivy-fs   — Trivy filesystem scan of repo + node_modules for CVEs
-#                exits 1 on CRITICAL/HIGH (unfixed only), also uploads SARIF
-#                to the GitHub Security tab (requires GHAS on private repos;
-#                upload step is continue-on-error so it degrades gracefully)
+#   grype-fs   — Grype filesystem scan of repo for CVEs (node_modules excluded;
+#                covered by pnpm audit). Exits 1 on fixed HIGH/CRITICAL, also
+#                uploads SARIF to the GitHub Security tab (requires GHAS on
+#                private repos; upload step is continue-on-error so it degrades
+#                gracefully)
 #
-# Image-level Trivy scans run in docker-publish.yml after each image is pushed.
+# Image-level Grype scans run in docker-publish.yml after each image is pushed.
 
 name: Security
 
@@ -59,8 +60,8 @@ jobs:
         run: pnpm audit --audit-level=high
 
   # ── Filesystem CVE scan ─────────────────────────────────────────────────────
-  trivy-fs:
-    name: Filesystem scan (Trivy)
+  grype-fs:
+    name: Filesystem scan (Grype)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,44 +70,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install Trivy from official release tarball; write to $HOME/bin and
-      # register in GITHUB_PATH so it's available in all subsequent steps.
-      - name: Install Trivy
+      # Install Grype — writes to $HOME/bin (no sudo required on GH runners).
+      - name: Install Grype
         run: |
-          wget -qO /tmp/trivy.tar.gz \
-            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
-          mkdir -p "$HOME/bin"
-          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b "$HOME/bin"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      # Gate: fails the job on any unfixed CRITICAL or HIGH finding.
-      # secret scanner omitted — Gitleaks handles secrets above.
+      # Gate: fails the job on any fixed HIGH or above finding.
+      # Gitleaks handles secrets; node_modules excluded (covered by pnpm audit).
       - name: Scan (table — PR gate)
         run: |
-          trivy fs . \
-            --scanners vuln \
-            --severity CRITICAL,HIGH \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --skip-dirs node_modules \
-            --format table
+          grype dir:. \
+            --fail-on high \
+            --only-fixed \
+            --exclude './node_modules/**' \
+            -o table
 
       # Reporting: produce SARIF for the Security tab (never gates the job).
       - name: Scan (SARIF — Security tab)
         if: always()
         run: |
-          trivy fs . \
-            --scanners vuln \
-            --severity CRITICAL,HIGH \
-            --exit-code 0 \
-            --ignore-unfixed \
-            --skip-dirs node_modules \
-            --format sarif \
-            --output trivy-fs.sarif
+          grype dir:. \
+            --only-fixed \
+            --exclude './node_modules/**' \
+            -o sarif \
+            --file grype-fs.sarif
 
       - name: Upload SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-fs.sarif
+          sarif_file: grype-fs.sarif
         continue-on-error: true  # GitHub Advanced Security required on private repos

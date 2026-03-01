@@ -151,7 +151,7 @@ jobs:
 
   # ── Image scan: mirrorr-app ─────────────────────────────────────────────────
   scan-app:
-    name: Image scan — mirrorr-app
+    name: Image scan (Grype) — mirrorr-app
     runs-on: ubuntu-latest
     needs: publish-app
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -173,48 +173,39 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Trivy
+      - name: Install Grype
         run: |
-          wget -qO /tmp/trivy.tar.gz \
-            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
-          mkdir -p "$HOME/bin"
-          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b "$HOME/bin"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      # Gate: fails on any unfixed CRITICAL finding in the published image.
+      # Gate: fails on any fixed CRITICAL finding in the published image.
       - name: Scan image (table — gate)
         run: |
-          trivy image \
-            --scanners vuln \
-            --severity CRITICAL \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --format table \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }}
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }} \
+            --fail-on critical \
+            --only-fixed \
+            -o table
 
       # Reporting: SARIF upload to Security tab (best-effort, GHAS required).
       - name: Scan image (SARIF — Security tab)
         if: always()
         run: |
-          trivy image \
-            --scanners vuln \
-            --severity CRITICAL,HIGH \
-            --exit-code 0 \
-            --ignore-unfixed \
-            --format sarif \
-            --output trivy-app.sarif \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }}
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }} \
+            --only-fixed \
+            -o sarif \
+            --file grype-app.sarif
 
       - name: Upload SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-app.sarif
+          sarif_file: grype-app.sarif
         continue-on-error: true
 
   # ── Image scan: mirrorr-worker ──────────────────────────────────────────────
   scan-worker:
-    name: Image scan — mirrorr-worker
+    name: Image scan (Grype) — mirrorr-worker
     runs-on: ubuntu-latest
     needs: publish-worker
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -234,39 +225,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Trivy
+      - name: Install Grype
         run: |
-          wget -qO /tmp/trivy.tar.gz \
-            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
-          mkdir -p "$HOME/bin"
-          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b "$HOME/bin"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Scan image (table — gate)
         run: |
-          trivy image \
-            --scanners vuln \
-            --severity CRITICAL \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --format table \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }}
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }} \
+            --fail-on critical \
+            --only-fixed \
+            -o table
 
       - name: Scan image (SARIF — Security tab)
         if: always()
         run: |
-          trivy image \
-            --scanners vuln \
-            --severity CRITICAL,HIGH \
-            --exit-code 0 \
-            --ignore-unfixed \
-            --format sarif \
-            --output trivy-worker.sarif \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }}
+          grype ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }} \
+            --only-fixed \
+            -o sarif \
+            --file grype-worker.sarif
 
       - name: Upload SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-worker.sarif
+          sarif_file: grype-worker.sarif
         continue-on-error: true
