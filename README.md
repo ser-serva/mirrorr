@@ -1,53 +1,150 @@
-# Turborepo starter
+# Mirrorr
 
-This Turborepo starter is maintained by the Turborepo core team.
+A self-hosted short-form video mirroring pipeline. Discovers creator content from source platforms (TikTok), downloads via `yt-dlp`, optionally transcodes with NVIDIA NVENC, and publishes to a target platform (self-hosted [Loops](https://github.com/interaapps/loops)).
 
-## Using this example
+Temporal.io handles all workflow orchestration — durable execution, retries, and audit history. A React dashboard gives full visibility into the pipeline and lets you manage creators, sources, targets, and individual videos.
 
-Run the following command:
+---
 
-```sh
-npx create-turbo@latest
+## Features
+
+- **Unattended operation** — Temporal schedules drive periodic discovery; no cron jobs needed
+- **Durable pipeline** — every video moves through a Temporal workflow; crashes and restarts are handled automatically
+- **Per-video controls** — ignore/unignore, manual retry, bulk actions from the dashboard
+- **Real-time dashboard** — Server-Sent Events push stage updates to the UI without polling
+- **Encrypted credentials** — target API tokens stored as AES-256-GCM ciphertext
+- **Adapter architecture** — add new source or target platforms with zero changes to the core pipeline
+- **VPN routing** — all outbound traffic routed through Gluetun (WireGuard) in dev and preprod
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js 22 (ESM) |
+| Language | TypeScript (strict) |
+| API | Fastify + Zod |
+| ORM | Drizzle ORM + drizzle-kit |
+| Database | SQLite (better-sqlite3) |
+| Orchestration | Temporal.io (self-hosted) |
+| Frontend | React 18 + Vite + TailwindCSS + shadcn/ui |
+| Data fetching | TanStack Query + SSE (EventSource) |
+| Video download | yt-dlp |
+| Video transcode | FFmpeg + NVIDIA NVENC (`h264_nvenc`) |
+| Monorepo | Turborepo + pnpm workspaces |
+| Containers | Docker + Docker Compose |
+| VPN | Gluetun (WireGuard) |
+
+---
+
+## Repository Layout
+
+```
+mirrorr/
+├── apps/
+│   ├── backend/          # Fastify API server + Temporal worker
+│   └── frontend/         # React admin dashboard
+├── packages/
+│   ├── shared/           # @mirrorr/shared — types, enums, constants
+│   ├── adapter-core/     # SourceAdapter / TargetAdapter interfaces
+│   ├── adapter-tiktok/   # TikTok discovery + download (yt-dlp)
+│   ├── adapter-instagram/# Stub (not implemented)
+│   └── adapter-loops/    # Loops REST API upload
+├── infra/
+│   ├── dev/              # Local dev stack (Temporal + hot-reload + Gluetun + Firefox)
+│   ├── preprod/          # Pre-production stack
+│   └── prod/             # Production stack (NVIDIA GPU)
+└── docs/
+    └── architecture.md   # Full architecture reference
 ```
 
-## What's inside?
+---
 
-This Turborepo includes the following packages/apps:
+## Getting Started
 
-### Apps and Packages
+### Prerequisites
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+- Docker + Docker Compose
+- pnpm 9+
+- Node.js 22+
+- A self-hosted [Loops](https://github.com/interaapps/loops) instance (upload target)
+- TikTok session cookies (`cookies.txt` in Netscape format) or a Firefox profile path
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+### Local Development
 
-### Utilities
+```bash
+# Install dependencies
+pnpm install
 
-This Turborepo has some additional tools already setup for you:
+# Copy and fill in env vars
+cp infra/dev/.env.example infra/dev/.env
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+# Start the dev stack (Temporal + backend hot-reload + Gluetun)
+cd infra/dev
+docker compose up -d
 
-### Build
-
-To build all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+# The API is available at http://localhost:4001
+# Temporal UI at http://localhost:8233
 ```
 
+### Environment Variables
+
+Key variables for `infra/dev/.env` (see `.env.example` for the full list):
+
+| Variable | Description |
+|---|---|
+| `ENCRYPTION_KEY` | 32-byte hex key for AES-256-GCM column encryption |
+| `ADMIN_PASSWORD` | Dashboard login password |
+| `SESSION_SECRET` | 32-byte hex key for session cookie signing |
+| `SESSION_SALT` | 16-byte hex salt for password hashing |
+| `WIREGUARD_PRIVATE_KEY` | WireGuard private key for Gluetun VPN |
+| `WIREGUARD_ADDRESSES` | VPN assigned address (e.g. `10.x.x.x/32`) |
+
+Generate secrets with:
+```bash
+openssl rand -hex 32   # ENCRYPTION_KEY, SESSION_SECRET
+openssl rand -hex 16   # SESSION_SALT
+```
+
+---
+
+## Pipeline
+
+Videos flow through a Temporal workflow with the following stages:
+
+```
+DOWNLOAD_QUEUED → DOWNLOADING → DOWNLOAD_SUCCEEDED
+  → TRANSCODING → TRANSCODE_SUCCEEDED
+  → UPLOADING → UPLOAD_SUCCEEDED
+```
+
+Retries use exponential backoff: `1m → 2m → 4m → 32m → 60m → FAILED`.
+
+Videos can be **ignored** at any stage — the Temporal workflow suspends in-place (preserving its current position) and resumes on unignore.
+
+---
+
+## Adapters
+
+The pipeline is decoupled from specific platforms via an adapter interface:
+
+- **Source adapters** — `discover()`, `download()`, `fetchMeta()`
+- **Target adapters** — `upload()`, `test()`, `provisionMirrorAccount()` (optional)
+
+Currently implemented: `adapter-tiktok` (source) and `adapter-loops` (target). To add a new platform, create a package implementing the interface from `@mirrorr/adapter-core` and register it — no changes to the core pipeline required.
+
+---
+
+## CI / Security
+
+| Check | Tool |
+|---|---|
+| Secret scanning | Gitleaks (full git history) |
+| Dependency audit | `pnpm audit --audit-level=high` |
+| CVE scanning | Grype (filesystem + published images) |
+
+See [docs/architecture.md](docs/architecture.md) for the full system design.
 You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
 
 ```
