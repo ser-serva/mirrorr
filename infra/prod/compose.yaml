@@ -79,6 +79,8 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    ports:
+      - "3002:3000"   # Firefox VNC web UI (docker compose --profile tools up firefox)
     environment:
       - VPN_SERVICE_PROVIDER=custom
       - VPN_TYPE=wireguard
@@ -142,10 +144,12 @@ services:
       - HTTP_PROXY=http://gluetun:8888
       - HTTPS_PROXY=http://gluetun:8888
       - NO_PROXY=temporal,postgresql,localhost,127.0.0.1
+      - FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox
     env_file:
       - .env
     volumes:
       - data:/data
+      - firefox_profile:/firefox-profile:ro
     networks:
       - internal
     depends_on:
@@ -161,6 +165,29 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ── Firefox (TikTok login — behind VPN) ──────────────────────────────────────
+  # VNC web UI: http://localhost:3002 (forwarded through Gluetun)
+  # Start on demand: docker compose --profile tools up -d firefox
+  # Log in to TikTok once — profile is persisted in the firefox_profile volume
+  # and mounted read-only into the worker at /firefox-profile.
+  # Set FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox in .env.
+  firefox:
+    image: lscr.io/linuxserver/firefox:latest
+    container_name: mirrorr_firefox
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_started
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-UTC}
+    volumes:
+      - firefox_profile:/config
+    profiles:
+      - tools
+    restart: no
+
 # ── Networks ────────────────────────────────────────────────────────────────
 networks:
   internal:
@@ -170,3 +197,4 @@ networks:
 volumes:
   postgres_data:   # Temporal Postgres state
   data:            # Shared app+worker: SQLite DB, cookies, downloads, transcodes
+  firefox_profile: # Persistent Firefox profile for TikTok cookie auth (--profile tools)

@@ -58,5 +58,26 @@ services:
     depends_on:
       - temporal
 
+  # ── Firefox (TikTok login) ────────────────────────────────────────────────────
+  # VNC web UI: http://localhost:3002 — log in to TikTok here once to populate
+  # the Firefox profile. yt-dlp reads cookies.sqlite directly via
+  # --cookies-from-browser firefox:<path>; no cookie export step needed.
+  # Note: dev has no Gluetun — Firefox uses the host machine's network.
+  # After logging in, set FIREFOX_PROFILE_PATH in .env (see .env.example).
+  firefox:
+    image: lscr.io/linuxserver/firefox:latest
+    container_name: mirrorr_dev_firefox
+    ports:
+      - "3002:3000"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-UTC}
+    volumes:
+      # Persistent Firefox profile — set FIREFOX_PROFILE_PATH in .env to:
+      #   ./data/firefox-profile/.config/mozilla/firefox
+      - ./data/firefox-profile:/config
+    restart: unless-stopped
+
 volumes:
   postgres_data:
