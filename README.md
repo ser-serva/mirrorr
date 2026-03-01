@@ -1,6 +1,6 @@
 # Mirrorr
 
-A self-hosted short-form video mirroring pipeline. Discovers creator content from source platforms (TikTok), downloads via `yt-dlp`, optionally transcodes with NVIDIA NVENC, and publishes to a target platform (self-hosted [Loops](https://github.com/interaapps/loops)).
+A self-hosted short-form video mirroring pipeline. Discovers creator content from source platforms (TikTok), downloads via `yt-dlp`, optionally transcodes with NVIDIA NVENC, and publishes to a target platform (self-hosted [Loops](https://github.com/joinloops/loops-server)).
 
 Temporal.io handles all workflow orchestration — durable execution, retries, and audit history. A React dashboard gives full visibility into the pipeline and lets you manage creators, sources, targets, and individual videos.
 
@@ -68,7 +68,7 @@ mirrorr/
 - Docker + Docker Compose
 - pnpm 9+
 - Node.js 22+
-- A self-hosted [Loops](https://github.com/interaapps/loops) instance (upload target)
+- A self-hosted [Loops](https://github.com/joinloops/loops-server) instance (upload target)
 - TikTok session cookies (`cookies.txt` in Netscape format) or a Firefox profile path
 
 ### Local Development
