@@ -16,5 +16,12 @@
   "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=18"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch@3": "3.1.4",
+      "minimatch@10": "10.2.3",
+      "serialize-javascript": "7.0.3"
+    }
   }
 }
