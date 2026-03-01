@@ -17,7 +17,7 @@ async function main() {
     taskQueue: env.TEMPORAL_TASK_QUEUE,
     // Barrel file exports: videoPipelineWorkflow, discoverCreatorWorkflow,
     // discoverAllCreatorsWorkflow — all registered from one entry point
-    workflowsPath: resolve(__dirname, './workflows/index.ts'),
+    workflowsPath: resolve(__dirname, './workflows/index.js'),
     // All pipeline activities including new discovery activities:
     // updateVideoStage, downloadVideo, transcodeVideo, uploadVideo,
     // cleanupArtifacts, archiveVideo, discoverCreatorVideos, getEnabledCreatorIds

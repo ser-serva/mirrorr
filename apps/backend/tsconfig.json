@@ -2,12 +2,12 @@
   "extends": "@repo/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "./src",
     "lib": ["es2022"],
     "types": ["node"],
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src", "tests", "vitest.config.ts"],
+  "include": ["src"],
   "exclude": ["node_modules", "dist"]
 }

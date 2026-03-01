@@ -52,7 +52,9 @@ RUN pnpm turbo build
 
 # ── Stage 4: app ─────────────────────────────────────────────────────────────
 # Lean runtime — API server only; no yt-dlp tooling needed
-FROM node:22-alpine AS app
+# NOTE: node:22-slim (Debian) is required here — Alpine (musl libc) cannot load
+# sodium-native prebuilt binaries which are compiled against glibc.
+FROM node:22-slim AS app
 WORKDIR /app
 
 # Copy production node_modules

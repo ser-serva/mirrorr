@@ -129,6 +129,8 @@ services:
       - data:/data
     networks:
       - internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       temporal:
         condition: service_healthy
@@ -155,13 +157,15 @@ services:
       - YTDLP_PROXY=http://gluetun:8888
       - HTTP_PROXY=http://gluetun:8888
       - HTTPS_PROXY=http://gluetun:8888
-      - NO_PROXY=temporal,postgresql,localhost,127.0.0.1
+      - NO_PROXY=temporal,postgresql,localhost,127.0.0.1,host.docker.internal
     env_file:
       - .env
     volumes:
       - data:/data
     networks:
       - internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       temporal:
         condition: service_healthy
