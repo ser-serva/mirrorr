@@ -1,0 +1,102 @@
+# Mirrorr — Security scanning
+#
+# Runs on every PR and push to main. Three parallel jobs:
+#
+#   gitleaks   — scans commit history for accidentally committed secrets
+#   audit      — pnpm audit, fails on HIGH or above
+#   trivy-fs   — Trivy filesystem scan of repo + node_modules for CVEs
+#                exits 1 on CRITICAL/HIGH (unfixed only), also uploads SARIF
+#                to the GitHub Security tab (requires GHAS on private repos;
+#                upload step is continue-on-error so it degrades gracefully)
+#
+# Image-level Trivy scans run in docker-publish.yml after each image is pushed.
+
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Secret scanning ─────────────────────────────────────────────────────────
+  gitleaks:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required to scan all commits in the PR
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Dependency audit ────────────────────────────────────────────────────────
+  audit:
+    name: Dependency audit (pnpm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit
+        run: pnpm audit --audit-level=high
+
+  # ── Filesystem CVE scan ─────────────────────────────────────────────────────
+  trivy-fs:
+    name: Filesystem scan (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Gate: fails the job on any unfixed CRITICAL or HIGH finding.
+      # Runs first so a failure gives a clear table output in the job log.
+      - name: Scan (table — PR gate)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      # Reporting: produce SARIF regardless of the gate result above
+      # so the Security tab always has up-to-date findings.
+      - name: Scan (SARIF — Security tab)
+        if: always()
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+        continue-on-error: true  # GitHub Advanced Security required on private repos
