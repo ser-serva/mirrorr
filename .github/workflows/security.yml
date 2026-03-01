@@ -44,8 +44,7 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: latest
+        # version is intentionally omitted — reads from packageManager in package.json
 
       - name: Setup Node
         uses: actions/setup-node@v4
