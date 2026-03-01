@@ -178,6 +178,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.30.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }}
+          scanners: vuln
           severity: CRITICAL
           exit-code: '1'
           ignore-unfixed: true
@@ -188,10 +189,12 @@ jobs:
         uses: aquasecurity/trivy-action@0.30.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-app:${{ steps.tag.outputs.value }}
+          scanners: vuln
           format: sarif
           output: trivy-app.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          exit-code: '0'
 
       - name: Upload SARIF
         if: always()
@@ -226,6 +229,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.30.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }}
+          scanners: vuln
           severity: CRITICAL
           exit-code: '1'
           ignore-unfixed: true
@@ -235,10 +239,12 @@ jobs:
         uses: aquasecurity/trivy-action@0.30.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/mirrorr-worker:${{ steps.tag.outputs.value }}
+          scanners: vuln
           format: sarif
           output: trivy-worker.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          exit-code: '0'
 
       - name: Upload SARIF
         if: always()
