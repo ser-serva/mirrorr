@@ -13,7 +13,11 @@
 #   - `deploy.resources.reservations.devices` in the compose file (see infra/prod/compose.yaml)
 
 # ── Stage 1: base ─────────────────────────────────────────────────────────────
-FROM node:22-alpine AS base
+# node:22-slim (Debian/glibc) is used for ALL stages so that native modules
+# (better-sqlite3, sodium-native) are compiled and run against the same libc.
+# Alpine (musl) would cause ERR_DLOPEN_FAILED when the binaries are copied into
+# the glibc-based runtime stages.
+FROM node:22-slim AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
@@ -52,8 +56,8 @@ RUN pnpm turbo build
 
 # ── Stage 4: app ─────────────────────────────────────────────────────────────
 # Lean runtime — API server only; no yt-dlp tooling needed
-# NOTE: node:22-slim (Debian) is required here — Alpine (musl libc) cannot load
-# sodium-native prebuilt binaries which are compiled against glibc.
+# Inherits node:22-slim from base (glibc) — consistent with deps/builder so that
+# native modules (sodium-native, better-sqlite3) load correctly at runtime.
 FROM node:22-slim AS app
 WORKDIR /app
 
