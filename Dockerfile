@@ -54,6 +54,11 @@ RUN pnpm install --frozen-lockfile
 # Build all packages in dependency order (turbo handles the DAG)
 RUN pnpm turbo build
 
+# Copy migration files (SQL + JSON) into dist — tsc only emits .js files.
+# migrationsFolder in db/index.ts resolves relative to the compiled file, so
+# migrations must live alongside the compiled output at dist/db/migrations/.
+RUN cp -r apps/backend/src/db/migrations apps/backend/dist/db/migrations
+
 # ── Stage 4: app ─────────────────────────────────────────────────────────────
 # Lean runtime — API server only; no yt-dlp tooling needed
 # Inherits node:22-slim from base (glibc) — consistent with deps/builder so that

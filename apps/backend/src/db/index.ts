@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { env } from '../env.js';
 import * as schema from './schema.js';
 
@@ -21,7 +22,10 @@ export function createDb() {
 }
 
 export async function runMigrations(db: Db) {
-  migrate(db as any, { migrationsFolder: './src/db/migrations' });
+  // Resolve relative to this compiled file so the path is correct in both
+  // dev (tsx running src/db/index.ts) and prod (node running dist/db/index.js).
+  const migrationsFolder = fileURLToPath(new URL('./migrations', import.meta.url));
+  migrate(db as any, { migrationsFolder });
 }
 
 export { schema };
