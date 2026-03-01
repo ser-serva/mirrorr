@@ -69,12 +69,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install Trivy via official install script (more reliable than the action
-      # binary downloader which can hit GitHub API rate limits in CI).
+      # Install Trivy from official release tarball; write to $HOME/bin and
+      # register in GITHUB_PATH so it's available in all subsequent steps.
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.60.0
+          wget -qO /tmp/trivy.tar.gz \
+            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
+          mkdir -p "$HOME/bin"
+          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       # Gate: fails the job on any unfixed CRITICAL or HIGH finding.
       # secret scanner omitted — Gitleaks handles secrets above.

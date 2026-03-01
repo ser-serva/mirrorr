@@ -175,8 +175,11 @@ jobs:
 
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.60.0
+          wget -qO /tmp/trivy.tar.gz \
+            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
+          mkdir -p "$HOME/bin"
+          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       # Gate: fails on any unfixed CRITICAL finding in the published image.
       - name: Scan image (table — gate)
@@ -233,8 +236,11 @@ jobs:
 
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.60.0
+          wget -qO /tmp/trivy.tar.gz \
+            https://github.com/aquasecurity/trivy/releases/download/v0.60.0/trivy_0.60.0_Linux-64bit.tar.gz
+          mkdir -p "$HOME/bin"
+          tar -xzf /tmp/trivy.tar.gz -C "$HOME/bin" trivy
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Scan image (table — gate)
         run: |
