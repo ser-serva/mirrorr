@@ -16,6 +16,7 @@ import { creatorsPlugin } from './routes/creators.routes.js';
 import { videosPlugin } from './routes/videos.routes.js';
 import { eventsPlugin } from './routes/events.routes.js';
 import { discoveryPlugin } from './routes/discovery.routes.js';
+import { sourcesPlugin } from './routes/sources.routes.js';
 import { startup } from './index.js';
 
 declare module '@fastify/secure-session' {
@@ -131,6 +132,7 @@ export async function buildServer(testDb?: Db) {
   await fastify.register(videosPlugin, { prefix: '/api' });
   await fastify.register(eventsPlugin, { prefix: '/api' });
   await fastify.register(discoveryPlugin, { prefix: '/api' });
+  await fastify.register(sourcesPlugin, { prefix: '/api' });
 
   return fastify;
 }

@@ -22,8 +22,15 @@ export type VideoStage =
 // ── Config JSON types ─────────────────────────────────────────────────────────
 
 export type TikTokSourceConfig = {
-  discoveryPlaylistLimit?: number; // default 10
-  discoveryMaxAgeDays?: number;    // default 3
+  // Discovery tuning
+  discoveryPlaylistLimit?: number;    // max entries per poll – default 10
+  discoveryMaxAgeDays?: number;       // skip videos older than N days – default 30
+  // Download concurrency
+  maxConcurrentDownloads?: number;    // per-source hint (informational); global limit
+                                      // enforced via MAX_CONCURRENT_DOWNLOADS env – default 3
+  // Cookie auth overrides (take precedence over env vars when set)
+  cookiesFile?: string;               // absolute path to Netscape cookies.txt
+  firefoxProfilePath?: string;        // absolute path to Firefox profile directory
 };
 
 export type LoopsTargetConfig = {

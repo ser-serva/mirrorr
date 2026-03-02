@@ -70,16 +70,64 @@ export async function updateVideoStage(videoId: number, stage: VideoStage): Prom
   }
 }
 
-export async function downloadVideo(videoId: number): Promise<string> {
-  const { heartbeat } = Context.current();
+export interface DownloadVideoResult {
+  localPath: string;
+  transcodeDecision: 'passthrough' | 'encode';
+}
+
+export async function downloadVideo(videoId: number): Promise<DownloadVideoResult> {
   const log = Context.current().log;
   log.info('downloadVideo start', { videoId });
 
-  // Heartbeat so Temporal knows the activity is alive during long downloads.
-  // TODO: spawn yt-dlp via adapter, heartbeat periodically, return local path
-  heartbeat({ progress: 'starting' });
+  const db = getDb();
 
-  return `/data/downloads/${videoId}.mp4`;
+  // Load video
+  const [video] = await db
+    .select()
+    .from(schema.videos)
+    .where(eq(schema.videos.id, videoId));
+  if (!video) throw new Error(`Video ${videoId} not found`);
+
+  // Load creator → source chain
+  const [creator] = await db
+    .select()
+    .from(schema.creators)
+    .where(eq(schema.creators.id, video.creatorId));
+  if (!creator) throw new Error(`Creator ${video.creatorId} not found`);
+
+  const [source] = await db
+    .select()
+    .from(schema.sources)
+    .where(eq(schema.sources.id, creator.sourceId));
+  if (!source) throw new Error(`Source ${creator.sourceId} not found`);
+
+  const adapter = await getSourceAdapterForType(source.type);
+
+  // Heartbeat every 15s so Temporal knows the activity is alive during long downloads
+  let hbInterval: NodeJS.Timeout | null = null;
+  try {
+    hbInterval = setInterval(() => {
+      Context.current().heartbeat({ progress: 'downloading' });
+    }, 15_000);
+
+    const localPath = await adapter.download(
+      source.config,
+      video.sourceVideoUrl,
+      '/data/downloads',
+    );
+
+    // Decision: always passthrough for now — transcode activity will probe later
+    const transcodeDecision = 'passthrough' as const;
+
+    await db
+      .update(schema.videos)
+      .set({ transcodeDecision })
+      .where(eq(schema.videos.id, videoId));
+
+    return { localPath, transcodeDecision };
+  } finally {
+    if (hbInterval) clearInterval(hbInterval);
+  }
 }
 
 export async function transcodeVideo(videoId: number): Promise<void> {

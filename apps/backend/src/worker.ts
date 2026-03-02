@@ -16,14 +16,15 @@ async function main() {
     namespace: env.TEMPORAL_NAMESPACE,
     taskQueue: env.TEMPORAL_TASK_QUEUE,
     // Barrel file exports: videoPipelineWorkflow, discoverCreatorWorkflow,
-    // discoverAllCreatorsWorkflow — all registered from one entry point
-    workflowsPath: resolve(__dirname, './workflows/index.js'),
+    // discoverAllCreatorsWorkflow — all registered from one entry point.
+    // Extension switches between .ts (tsx dev) and .js (compiled prod).
+    workflowsPath: resolve(__dirname, `./workflows/index${import.meta.url.endsWith('.ts') ? '.ts' : '.js'}`),
     // All pipeline activities including new discovery activities:
     // updateVideoStage, downloadVideo, transcodeVideo, uploadVideo,
     // cleanupArtifacts, archiveVideo, discoverCreatorVideos, getEnabledCreatorIds
     activities,
     maxConcurrentActivityTaskExecutions:
-      env.DOWNLOAD_CONCURRENCY + env.UPLOAD_CONCURRENCY,
+      env.MAX_CONCURRENT_DOWNLOADS + env.UPLOAD_CONCURRENCY,
   });
 
   console.log(`🔧 Temporal worker connected to ${env.TEMPORAL_ADDRESS}`);

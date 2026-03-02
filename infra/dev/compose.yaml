@@ -1,16 +1,64 @@
 # Mirrorr — dev infrastructure
-# Runs: Temporal server (SQLite-backed) + Temporal UI
+# Runs: Temporal server (Postgres-backed) + Temporal UI
 #
-# Backend + worker run on the HOST via `pnpm dev` / `pnpm worker:dev`
-# so they can use tsx hot-reload and reach Temporal on localhost:7233.
-# Frontend Vite dev server also runs on the host.
+# Two modes for running backend + worker:
+#   HOST (default):    pnpm --filter backend dev / worker:dev   — no Docker build needed
+#   CONTAINERS:        docker compose --profile dev up -d        — full hot-reload with yt-dlp
 #
-# Usage:
-#   docker compose -f infra/dev/compose.yaml up -d
-#   pnpm --filter backend dev       # Fastify API (port 4001)
-#   pnpm --filter backend worker:dev # Temporal worker
+# Container mode (--profile dev) adds:
+#   gluetun         — WireGuard VPN gateway; yt-dlp + Firefox traffic routed through it
+#   firefox         — TikTok login via VNC (http://localhost:3002, via Gluetun)
+#   packages-watch  — turbo watch rebuilds packages/*/dist on source change
+#   app             — Fastify API (tsx watch, port 4001)
+#   worker          — Temporal worker (tsx watch, picks up rebuilt dists)
+#
+# Usage (container mode):
+#   docker compose -f infra/dev/compose.yaml --profile dev up -d
+#   docker compose -f infra/dev/compose.yaml --profile dev logs -f app worker
+#
+# Hot-reload chain for workspace packages:
+#   packages-watch: turbo build (once) then tsc --watch per-package → rebuilds packages/*/dist
+#   app / worker:   tsx watch   → detects dist change → restarts
+#
+# Env file: infra/dev/.env  (never commit — contains secrets)
+
+# ── Shared volume list for the three container-dev services ──────────────────
+# YAML anchor *dev-volumes is referenced in packages-watch, app, and worker.
+x-dev-volumes: &dev-volumes
+  # Workspace packages: source + dist shared across all dev containers.
+  # Named volumes shadow host node_modules so the container's pnpm install is used.
+  - ../../packages:/app/packages
+  - pkgs_adapter_tiktok_nm:/app/packages/adapter-tiktok/node_modules
+  - pkgs_adapter_core_nm:/app/packages/adapter-core/node_modules
+  - pkgs_adapter_loops_nm:/app/packages/adapter-loops/node_modules
+  - pkgs_shared_nm:/app/packages/shared/node_modules
+  - pkgs_ytdlp_nm:/app/packages/ytdlp/node_modules
+  - pkgs_ui_nm:/app/packages/ui/node_modules
+  - pkgs_eslint_config_nm:/app/packages/eslint-config/node_modules
+  - pkgs_typescript_config_nm:/app/packages/typescript-config/node_modules
+  # Root workspace and backend node_modules stay in the image layer
+  - root_nm:/app/node_modules
+  - backend_nm:/app/apps/backend/node_modules
+  # Backend source — tsx watches this directory for hot-reload
+  - ../../apps/backend/src:/app/apps/backend/src
+  # Workspace turbo config — required by packages-watch (turbo watch build)
+  - ../../turbo.json:/app/turbo.json:ro
+  # Persist turbo cache across container restarts so packages-watch doesn't
+  # rebuild all packages from scratch every time (which cascades tsx restarts).
+  # Named volume avoids root vs. host-user permission conflicts.
+  - turbo_cache:/app/.turbo
+  # SQLite database — DATABASE_PATH=./data/mirrorr.db resolves here
+  - ../../apps/backend/data:/app/apps/backend/data
+  # Large media storage on external drive — keeps repo dir lean
+  - /mnt/e/docker-storage/mirrorr/downloads:/data/downloads
+  - /mnt/e/docker-storage/mirrorr/transcodes:/data/transcodes
+  # Firefox profile (named volume) — read-only in all dev containers.
+  # Worker reads cookies via FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox
+  - firefox_profile:/firefox-profile:ro
 
 services:
+
+  # ── Postgres (Temporal persistence) ─────────────────────────────────────────
   postgresql:
     image: postgres:16-alpine
     container_name: mirrorr_postgres
@@ -20,12 +68,14 @@ services:
       POSTGRES_DB: temporal
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks: [internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U temporal"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  # ── Temporal server ──────────────────────────────────────────────────────────
   temporal:
     image: temporalio/auto-setup:1.29.3
     container_name: mirrorr_temporal
@@ -37,6 +87,7 @@ services:
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=postgresql
+    networks: [internal]
     depends_on:
       postgresql:
         condition: service_healthy
@@ -47,6 +98,7 @@ services:
       retries: 15
       start_period: 30s
 
+  # ── Temporal UI ──────────────────────────────────────────────────────────────
   temporal-ui:
     image: temporalio/ui:2.45.4
     container_name: mirrorr_temporal_ui
@@ -55,29 +107,175 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:5173,http://localhost:4001
+    networks: [internal]
     depends_on:
       - temporal
 
-  # ── Firefox (TikTok login) ────────────────────────────────────────────────────
-  # VNC web UI: http://localhost:3002 — log in to TikTok here once to populate
-  # the Firefox profile. yt-dlp reads cookies.sqlite directly via
-  # --cookies-from-browser firefox:<path>; no cookie export step needed.
-  # Note: dev has no Gluetun — Firefox uses the host machine's network.
-  # After logging in, set FIREFOX_PROFILE_PATH in .env (see .env.example).
+  # ── Gluetun VPN gateway (profile: dev) ──────────────────────────────────────
+  # Routes yt-dlp + Firefox traffic through WireGuard so host IP is never
+  # exposed to TikTok during discovery or download.
+  # FIREWALL_OUTBOUND_SUBNETS lets worker→temporal/postgres traffic bypass the
+  # VPN tunnel while external (TikTok) traffic is tunnelled.
+  # Port 3002 forwards the Firefox VNC web UI through the Gluetun container.
+  # WireGuard config (keys, addresses) comes from .env — see .env.example.
+  gluetun:
+    profiles: [dev]
+    image: qmcgaw/gluetun:latest
+    container_name: mirrorr_dev_gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "3002:3000"   # Firefox VNC web UI
+    env_file: [.env]
+    environment:
+      FIREWALL_OUTBOUND_SUBNETS: 172.33.0.0/24,172.17.0.0/16
+      HEALTH_VPN_DURATION_INITIAL: 120s
+      HTTPPROXY: "on"
+      HTTPPROXY_LOG: "off"
+    networks: [internal]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ping -c 1 www.google.com || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Firefox (TikTok login — profile: dev) ────────────────────────────────────
+  # VNC web UI: http://localhost:3002 — routed through Gluetun (same URL).
+  # Log in to TikTok once; profile persists in the firefox_profile volume.
+  # Then set FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox in .env.
   firefox:
+    profiles: [dev]
     image: lscr.io/linuxserver/firefox:latest
     container_name: mirrorr_dev_firefox
-    ports:
-      - "3002:3000"
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=${TZ:-UTC}
     volumes:
-      # Persistent Firefox profile — set FIREFOX_PROFILE_PATH in .env to:
-      #   ./data/firefox-profile/.config/mozilla/firefox
-      - ./data/firefox-profile:/config
+      - firefox_profile:/config
+    restart: no
+
+  # ── packages-watch (profile: dev) ────────────────────────────────────────────
+  # 1. One-shot turbo build (respects ^build dependency order) so all dist files
+  #    are up-to-date before the app/worker containers start watching.
+  # 2. Switches to per-package tsc --watch for hot-reload.
+  #
+  # WHY not 'turbo watch': on Linux bind-mounts, turbo watch reacts to its own
+  # inotify writes to dist/ and creates an infinite rebuild cycle (two alternating
+  # cache hashes).  tsc --watch only watches src/ (per tsconfig "include": ["src"])
+  # so it never triggers itself.
+  packages-watch:
+    profiles: [dev]
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: dev
+    image: mirrorr:dev
+    container_name: mirrorr_dev_packages_watch
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "[packages-watch] Initial build via turbo..."
+        pnpm turbo build --filter='./packages/*'
+        echo "[packages-watch] Initial build done. Starting tsc watchers..."
+        for pkg in shared adapter-core adapter-tiktok adapter-loops ytdlp; do
+          (cd /app/packages/$$pkg && pnpm exec tsc --watch --preserveWatchOutput) &
+        done
+        wait
+    env_file: [.env]
+    networks: [internal]
+    volumes: *dev-volumes
     restart: unless-stopped
+
+  # ── app (profile: dev) ───────────────────────────────────────────────────────
+  # Fastify API server — tsx hot-reload on apps/backend/src changes.
+  # Port 4001 matches the host dev mode so curl commands are identical.
+  app:
+    profiles: [dev]
+    image: mirrorr:dev
+    container_name: mirrorr_dev_app
+    working_dir: /app/apps/backend
+    command: ["pnpm", "exec", "tsx", "watch", "src/server.ts"]
+    ports:
+      - "4001:4001"
+    env_file: [.env]
+    environment:
+      NODE_ENV: development
+      # Inside Docker, Temporal is reachable by service name — not localhost
+      TEMPORAL_ADDRESS: temporal:7233
+      # Used by TiktokAdapter.test() to route the VPN IP check through Gluetun.
+      # Does NOT set HTTP_PROXY globally (which breaks tsx watch).
+      YTDLP_PROXY: http://gluetun:8888
+    volumes: *dev-volumes
+    networks: [internal]
+    depends_on:
+      temporal:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── worker (profile: dev) ────────────────────────────────────────────────────
+  # Temporal activity/workflow worker — tsx hot-reload on backend src changes.
+  # yt-dlp is installed in the dev image (shared system-tools stage) and matches
+  # the same pinned version as the prod worker (ARG YTDLP_VERSION in Dockerfile).
+  worker:
+    profiles: [dev]
+    image: mirrorr:dev
+    container_name: mirrorr_dev_worker
+    working_dir: /app/apps/backend
+    command: ["pnpm", "exec", "tsx", "watch", "src/worker.ts"]
+    env_file: [.env]
+    environment:
+      NODE_ENV: development
+      TEMPORAL_ADDRESS: temporal:7233
+      # Route all yt-dlp subprocess calls through the Gluetun HTTP proxy.
+      # HTTP_PROXY / HTTPS_PROXY guard against accidental IP leaks from any
+      # other outbound HTTP (fetch, etc.). NO_PROXY keeps internal traffic local.
+      YTDLP_PROXY: http://gluetun:8888
+      HTTP_PROXY: http://gluetun:8888
+      HTTPS_PROXY: http://gluetun:8888
+      NO_PROXY: temporal,postgresql,localhost,127.0.0.1,host.docker.internal
+    volumes: *dev-volumes
+    networks: [internal]
+    depends_on:
+      temporal:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.33.0.0/24   # referenced in gluetun FIREWALL_OUTBOUND_SUBNETS
 
 volumes:
   postgres_data:
+  # Named volumes for container dev mode — shadow host package node_modules
+  pkgs_adapter_tiktok_nm:
+  pkgs_adapter_core_nm:
+  pkgs_adapter_loops_nm:
+  pkgs_shared_nm:
+  pkgs_ytdlp_nm:
+  pkgs_ui_nm:
+  pkgs_eslint_config_nm:
+  pkgs_typescript_config_nm:
+  root_nm:
+  backend_nm:
+  turbo_cache:       # Persistent turbo build cache — avoids full rebuilds on container restarts
+  firefox_profile:   # Persistent TikTok login — mount read-only in worker via FIREFOX_PROFILE_PATH

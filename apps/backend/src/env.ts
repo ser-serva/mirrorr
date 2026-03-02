@@ -20,8 +20,7 @@ const EnvSchema = z.object({
 
   // ── Worker concurrency ────────────────────────────────────────────────────
   DOWNLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),
-  UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),
-
+  UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),  MAX_CONCURRENT_DOWNLOADS: z.coerce.number().int().min(1).default(3),
   // ── TikTok auth ───────────────────────────────────────────────────────────
   TIKTOK_COOKIES_FILE: z.string().default('./data/cookies/cookies.txt'),
   FIREFOX_PROFILE_PATH: z.string().optional(),

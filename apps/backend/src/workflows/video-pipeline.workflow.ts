@@ -54,15 +54,17 @@ export async function videoPipelineWorkflow(input: VideoPipelineInput): Promise<
 
   await updateVideoStage(videoId, 'DOWNLOADING');
   await resume();
-  await downloadVideo(videoId);
+  const { transcodeDecision } = await downloadVideo(videoId);
   await updateVideoStage(videoId, 'DOWNLOAD_SUCCEEDED');
 
-  // ── Transcode ───────────────────────────────────────────────────────────
+  // ── Transcode (skipped for passthrough) ────────────────────────────────
 
-  await updateVideoStage(videoId, 'TRANSCODING');
-  await resume();
-  await transcodeVideo(videoId);
-  await updateVideoStage(videoId, 'TRANSCODE_SUCCEEDED');
+  if (transcodeDecision === 'encode') {
+    await updateVideoStage(videoId, 'TRANSCODING');
+    await resume();
+    await transcodeVideo(videoId);
+    await updateVideoStage(videoId, 'TRANSCODE_SUCCEEDED');
+  }
 
   // ── Upload ──────────────────────────────────────────────────────────────
 
