@@ -114,16 +114,18 @@ Feature Level  →  Feature Specs (SpecKit)
 
 **Responsibility:** Everything about *where* content is published. Owns the full lifecycle of upload destinations — admin accounts, per-creator mirror accounts, their credentials, their configuration, and the parent-child relationship between them. Processing logic (transcoding, metadata normalisation, format conversion) **also lives here** because processing rules are target-platform-specific: what matters is what the target platform requires, not what the source provides.
 
-**Internal structure — Parent / Child:**
+**Internal structure — single `targets` table, two `kind` values:**
 
-- **Target Parent (Target Application)** — manually registered by the operator. Owns admin credentials, platform-level configuration (`mirroringEnabled`, upload limits, transcode preferences, retention policy), and the full lifecycle of child accounts it spawns.
-- **Target Child (Target Account)** — auto-provisioned per-creator account on the same platform. Encapsulates all mirroring behaviour for one creator: their profile, upload credentials, and the processing applied to their content. Inherits any unset config from the parent.
+- **Target Application** (`kind = 'application'`) — manually registered by the operator. Owns admin credentials and `ApplicationConfig` (`mirroringEnabled`, upload limits, transcode preferences, retention policy). Serves as the config template for all Target Accounts provisioned under it. `applicationId = NULL`.
+- **Target Account** (`kind = 'account'`) — auto-provisioned per-creator record on the same platform. Stores `AccountConfig` (`profileHandle`, credentials, sparse overrides). Any unset config field inherits from the Target Application, then the system default. `applicationId` references its Target Application.
+
+Both kinds share a single `config` JSON column — shape differs by `kind`. `TargetConnectionService` owns the merge; callers receive a flat resolved object and never see `kind`, `applicationId`, or any hierarchy fields.
 
 **Owns:**
-- Target records (parent and child) with encrypted credentials
-- `mirroringEnabled` flag — the parent's decision about upload strategy for all its creators; not a creator concern
-- Parent-child relationship (hierarchy depth = 1, enforced at write time)
-- Config inheritance: child inherits any unset field from parent, then system default
+- All target records (`kind = 'application'` and `kind = 'account'`) with encrypted credentials
+- `mirroringEnabled` flag in `ApplicationConfig` — the Target Application's decision about upload strategy for all its creators; not a creator concern
+- The `applicationId` relationship (depth = 1, enforced at write time)
+- Config inheritance: `AccountConfig` overrides `ApplicationConfig` overrides system default
 - Mirror account lifecycle: provision (find-or-create), refresh, delete — delegated to `MirrorCapableTargetAdapter`
 - Connection health state (`lastTestedAt`, `lastTestOk`)
 - Processing configuration (transcode adapter selection, format requirements)
@@ -134,10 +136,10 @@ Feature Level  →  Feature Specs (SpecKit)
 - Content item state — that is Video Domain
 
 **Key invariants:**
-- Hierarchy depth = 1. A Target Account has exactly one parent. Parents have no parent.
-- Any target with `applicationId` set has `kind = true`.
-- `mirroringEnabled` lives on the Target Application only.
-- No other domain traverses or interprets the parent-child relationship.
+- Hierarchy depth = 1. A Target Account has exactly one Target Application. Target Applications have no `applicationId`.
+- Any target with `applicationId` set MUST have `kind = 'account'`.
+- `mirroringEnabled` lives in `ApplicationConfig` only.
+- No other domain traverses or interprets the `applicationId` relationship.
 
 **`TargetConnectionService`** is the Anti-Corruption Layer (ACL) exposed to all callers. It returns a fully resolved `TargetConnection` (decrypted credentials + merged config with all inheritance applied). Callers never see `kind`, `applicationId`, `mirroringEnabled`, or any hierarchy fields.
 
@@ -307,15 +309,17 @@ The API hands off to Pipeline and does not implement business logic or domain ru
 |---|---|
 | **Creator** | A tracked content source account (e.g. a TikTok handle) whose content is being mirrored. |
 | **Source** | A registered source platform configuration. One source can serve many creators. |
-| **Target** | A registered upload destination. May be a parent (admin) target or a child (mirror) target. |
-| **Target Application (`kind = 'application'`)** | A manually registered target using the operator's credentials. `kind = false`. No `applicationId`. |
-| **Target Account (`kind = 'account'`)** | An auto-provisioned per-creator account on a target platform. `kind = true`, has a `applicationId`. |
-| **Mirroring enabled** | Target Application config flag. When `true`, per-creator child accounts are used for upload instead of the admin account. |
-| **Effective target** | The target a creator's content will be uploaded to. Opaque outside Target Domain. |
-| **Target connection** | A fully resolved, ready-to-use upload context (decrypted credentials + merged config with inheritance applied). Output of `TargetConnectionService.resolveUploadTarget`. |
-| **Provision** | Create (or find-and-map if already exists) a child mirror account on the target platform. |
-| **Refresh** | Reset credentials on an existing child mirror account (e.g. after token expiry or sync failure). |
-| **Delete** | Remove the child mirror account from the target platform and revert the creator's target reference to the parent. |
+| **Target** | A registered upload destination. Either a Target Application (`kind = 'application'`) or a Target Account (`kind = 'account'`). Both live in the same `targets` table. |
+| **Target Application** | `kind = 'application'`. Manually registered by the operator. Holds admin credentials and `ApplicationConfig`. `applicationId = NULL`. |
+| **Target Account** | `kind = 'account'`. Auto-provisioned per-creator record on the same platform as its Target Application. Holds `AccountConfig`; unset fields inherit from the Target Application. Has a non-null `applicationId`. |
+| **`ApplicationConfig`** | JSON config shape for a Target Application. Contains `mirroringEnabled`, upload limits, transcode settings, retention policy. |
+| **`AccountConfig`** | JSON config shape for a Target Account. Contains `profileHandle`, credentials, and optional overrides of `ApplicationConfig` fields. |
+| **Mirroring enabled** | `ApplicationConfig` flag. When `true`, each creator under this Target Application uploads via their own Target Account rather than the shared application credentials. |
+| **Effective target** | The resolved upload destination for a creator. Opaque outside Target Domain — callers receive a `TargetConnection`, not a raw target row. |
+| **Target connection** | A fully resolved, ready-to-use upload context (decrypted credentials + merged config with all inheritance applied). Output of `TargetConnectionService.resolveUploadTarget`. |
+| **Provision** | Create (or find-and-map if already exists) a Target Account on the target platform for a specific creator. |
+| **Refresh** | Reset credentials on an existing Target Account (e.g. after token expiry or sync failure). |
+| **Delete** | Remove the Target Account from the target platform and revert the creator's `targetId` to the Target Application. |
 | **Content item / Video** | A single piece of content in the system. Has its own lifecycle state machine spanning Source and Target. |
 | **Stage** | Current position of a content item in its lifecycle state machine. Denormalized from Temporal to SQLite. |
 | **Ignored** | A content item whose pipeline workflow is suspended. Stage unchanged; processing resumes on un-ignore signal. |
@@ -331,13 +335,13 @@ The API hands off to Pipeline and does not implement business logic or domain ru
 ## 8. Key Design Tensions & Decisions
 
 ### T-001: Mirror decisions belong to Target Domain, not Creator Domain
-`mirroringEnabled` is an Target Application configuration. The Target Application sets the upload strategy for all creators that use it. Creators hold a reference to their effective target; `TargetConnectionService` resolves what "effective" means. See spec `007-target-hierarchy`.
+`mirroringEnabled` is a Target Application config field. The Target Application sets the upload strategy for all creators associated with it. Creators hold a reference to their effective target; `TargetConnectionService` resolves what "effective" means. See spec `007-target-hierarchy`.
 
 ### T-002: Processing (transcoding) belongs to Target Domain, not Pipeline
 Transcoding sits between download and upload in the stage sequence, but processing rules are target-platform-specific. A target may require H.264, a specific resolution, or a maximum file size. The transcode adapter configuration lives on the target. Pipeline executes the activity; what to do comes from the target config resolved by `TargetConnectionService`. See spec `001-transcode-adapters`.
 
 ### T-003: Configuration inheritance must not leak outside Target Domain
-Child targets may inherit config from their parent. `TargetConnectionService.resolveUploadTarget` returns a fully merged `TargetConnection`. All traversal is internal to Target Domain. Callers receive only resolved values. See specs `007-target-hierarchy` and `001-transcode-adapters`.
+Target Accounts inherit unset config fields from their Target Application. `TargetConnectionService.resolveUploadTarget` performs the merge and returns a fully resolved `TargetConnection`. All traversal of `applicationId` is internal to Target Domain. Callers receive only resolved values. See specs `007-target-hierarchy` and `001-transcode-adapters`.
 
 ### T-004: New target types must not require pipeline changes
 `TargetConnectionService` as an ACL absorbs all target-domain changes. `MirrorCapableTargetAdapter` adds mirror lifecycle methods without modifying `TargetAdapter`. Pipeline activities depend only on the service interface.
@@ -346,7 +350,7 @@ Child targets may inherit config from their parent. `TargetConnectionService.res
 If provisioning succeeds on the remote platform but the DB write fails, a retry must not create a duplicate account. The adapter MUST detect an existing account for the handle, map to it, and return its credentials. This makes the entire provisioning flow safe to retry from any failure point.
 
 ### T-006: Creator holds a single target reference — no fallback fields
-`effectiveTargetId = creator.mirrorTargetId ?? creator.targetId` already exists in upload activity code and would spread to transcode config, health checks, and UI rendering. Creator holds exactly one `targetId` — always the effective target. The parent relationship is expressed as `childTarget.applicationId`, owned entirely by Target Domain. See spec `007-target-hierarchy`.
+`effectiveTargetId = creator.mirrorTargetId ?? creator.targetId` already exists in upload activity code and would spread to transcode config, health checks, and UI rendering. Creator holds exactly one `targetId` — always the effective target. The Target Application / Target Account relationship is expressed as `applicationId` on the Target Account row, owned entirely by Target Domain. See spec `007-target-hierarchy`.
 
 ### T-007: Pipeline is a general execution engine, not a content pipeline
 Pipeline will run provisioning workflows with the same engine as content workflows. Each domain (Video, Creator) owns its own workflow spec. Pipeline owns execution only — no domain logic.
