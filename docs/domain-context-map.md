@@ -116,8 +116,8 @@ Feature Level  →  Feature Specs (SpecKit)
 
 **Internal structure — Parent / Child:**
 
-- **Target Parent (admin target)** — manually registered by the operator. Owns admin credentials, platform-level configuration (`mirroringEnabled`, upload limits, transcode preferences, retention policy), and the full lifecycle of child accounts it spawns.
-- **Target Child (mirror target)** — auto-provisioned per-creator account on the same platform. Encapsulates all mirroring behaviour for one creator: their profile, upload credentials, and the processing applied to their content. Inherits any unset config from the parent.
+- **Target Parent (Target Application)** — manually registered by the operator. Owns admin credentials, platform-level configuration (`mirroringEnabled`, upload limits, transcode preferences, retention policy), and the full lifecycle of child accounts it spawns.
+- **Target Child (Target Account)** — auto-provisioned per-creator account on the same platform. Encapsulates all mirroring behaviour for one creator: their profile, upload credentials, and the processing applied to their content. Inherits any unset config from the parent.
 
 **Owns:**
 - Target records (parent and child) with encrypted credentials
@@ -134,12 +134,12 @@ Feature Level  →  Feature Specs (SpecKit)
 - Content item state — that is Video Domain
 
 **Key invariants:**
-- Hierarchy depth = 1. A child target has exactly one parent. Parents have no parent.
-- Any target with `parentTargetId` set has `isMirror = true`.
-- `mirroringEnabled` lives on the parent target only.
+- Hierarchy depth = 1. A Target Account has exactly one parent. Parents have no parent.
+- Any target with `applicationId` set has `kind = true`.
+- `mirroringEnabled` lives on the Target Application only.
 - No other domain traverses or interprets the parent-child relationship.
 
-**`TargetConnectionService`** is the Anti-Corruption Layer (ACL) exposed to all callers. It returns a fully resolved `TargetConnection` (decrypted credentials + merged config with all inheritance applied). Callers never see `isMirror`, `parentTargetId`, `mirroringEnabled`, or any hierarchy fields.
+**`TargetConnectionService`** is the Anti-Corruption Layer (ACL) exposed to all callers. It returns a fully resolved `TargetConnection` (decrypted credentials + merged config with all inheritance applied). Callers never see `kind`, `applicationId`, `mirroringEnabled`, or any hierarchy fields.
 
 **Key interfaces:**
 - `TargetAdapter` — base: `upload`, `test`
@@ -293,7 +293,7 @@ The API hands off to Pipeline and does not implement business logic or domain ru
 
 | Pair | Pattern | Notes |
 |---|---|---|
-| Pipeline → Target | **Downstream via ACL** | `TargetConnectionService` is the Anti-Corruption Layer. Pipeline never sees `isMirror`, `parentTargetId`, or `mirroringEnabled`. |
+| Pipeline → Target | **Downstream via ACL** | `TargetConnectionService` is the Anti-Corruption Layer. Pipeline never sees `kind`, `applicationId`, or `mirroringEnabled`. |
 | Pipeline → Source | **Downstream (conformist)** | Pipeline hands opaque `source.config` JSON directly to the adapter. No translation needed. |
 | Creator → Target | **Published contract / event** | Creator emits a provisioning need. Target Domain acts and returns the result. Creator holds the result without knowing Target internals. |
 | Adapter → Platform | **Conformist** | Each adapter wraps the platform API as-is. Platform quirks are contained inside the adapter boundary. |
@@ -308,9 +308,9 @@ The API hands off to Pipeline and does not implement business logic or domain ru
 | **Creator** | A tracked content source account (e.g. a TikTok handle) whose content is being mirrored. |
 | **Source** | A registered source platform configuration. One source can serve many creators. |
 | **Target** | A registered upload destination. May be a parent (admin) target or a child (mirror) target. |
-| **Parent target / Admin target** | A manually registered target using the operator's credentials. `isMirror = false`. No `parentTargetId`. |
-| **Child target / Mirror target** | An auto-provisioned per-creator account on a target platform. `isMirror = true`, has a `parentTargetId`. |
-| **Mirroring enabled** | Parent target config flag. When `true`, per-creator child accounts are used for upload instead of the admin account. |
+| **Target Application (`kind = 'application'`)** | A manually registered target using the operator's credentials. `kind = false`. No `applicationId`. |
+| **Target Account (`kind = 'account'`)** | An auto-provisioned per-creator account on a target platform. `kind = true`, has a `applicationId`. |
+| **Mirroring enabled** | Target Application config flag. When `true`, per-creator child accounts are used for upload instead of the admin account. |
 | **Effective target** | The target a creator's content will be uploaded to. Opaque outside Target Domain. |
 | **Target connection** | A fully resolved, ready-to-use upload context (decrypted credentials + merged config with inheritance applied). Output of `TargetConnectionService.resolveUploadTarget`. |
 | **Provision** | Create (or find-and-map if already exists) a child mirror account on the target platform. |
@@ -331,7 +331,7 @@ The API hands off to Pipeline and does not implement business logic or domain ru
 ## 8. Key Design Tensions & Decisions
 
 ### T-001: Mirror decisions belong to Target Domain, not Creator Domain
-`mirroringEnabled` is an admin target configuration. The admin target sets the upload strategy for all creators that use it. Creators hold a reference to their effective target; `TargetConnectionService` resolves what "effective" means. See spec `007-target-hierarchy`.
+`mirroringEnabled` is an Target Application configuration. The Target Application sets the upload strategy for all creators that use it. Creators hold a reference to their effective target; `TargetConnectionService` resolves what "effective" means. See spec `007-target-hierarchy`.
 
 ### T-002: Processing (transcoding) belongs to Target Domain, not Pipeline
 Transcoding sits between download and upload in the stage sequence, but processing rules are target-platform-specific. A target may require H.264, a specific resolution, or a maximum file size. The transcode adapter configuration lives on the target. Pipeline executes the activity; what to do comes from the target config resolved by `TargetConnectionService`. See spec `001-transcode-adapters`.
@@ -346,7 +346,7 @@ Child targets may inherit config from their parent. `TargetConnectionService.res
 If provisioning succeeds on the remote platform but the DB write fails, a retry must not create a duplicate account. The adapter MUST detect an existing account for the handle, map to it, and return its credentials. This makes the entire provisioning flow safe to retry from any failure point.
 
 ### T-006: Creator holds a single target reference — no fallback fields
-`effectiveTargetId = creator.mirrorTargetId ?? creator.targetId` already exists in upload activity code and would spread to transcode config, health checks, and UI rendering. Creator holds exactly one `targetId` — always the effective target. The parent relationship is expressed as `childTarget.parentTargetId`, owned entirely by Target Domain. See spec `007-target-hierarchy`.
+`effectiveTargetId = creator.mirrorTargetId ?? creator.targetId` already exists in upload activity code and would spread to transcode config, health checks, and UI rendering. Creator holds exactly one `targetId` — always the effective target. The parent relationship is expressed as `childTarget.applicationId`, owned entirely by Target Domain. See spec `007-target-hierarchy`.
 
 ### T-007: Pipeline is a general execution engine, not a content pipeline
 Pipeline will run provisioning workflows with the same engine as content workflows. Each domain (Video, Creator) owns its own workflow spec. Pipeline owns execution only — no domain logic.
@@ -358,12 +358,12 @@ Pipeline will run provisioning workflows with the same engine as content workflo
 | Spec Topic | Domain |
 |---|---|
 | Creator discovery (finding new creator handles) | Creator Domain |
-| Mirror account creation / provisioning | Target Domain (child target lifecycle) |
-| Creator profile management on target platform | Target Domain (child target) |
+| Mirror account creation / provisioning | Target Domain (Target Account lifecycle) |
+| Creator profile management on target platform | Target Domain (Target Account) |
 | Content enumeration per creator | Video / Content Domain |
 | Content download behaviour | Source Domain |
 | Transcoding / processing rules | Target Domain (target config drives processing) |
-| Content upload | Target Domain (child target, via `TargetConnectionService`) |
+| Content upload | Target Domain (Target Account, via `TargetConnectionService`) |
 | Video lifecycle state transitions | Video / Content Domain |
 | Stage sequencing, failure, retry | Pipeline Domain |
 | Platform authentication, rate limiting, retry | Source / Target Domain (adapter layer) |
@@ -399,7 +399,7 @@ Pipeline will run provisioning workflows with the same engine as content workflo
 - **Q2: Retry model for `refreshMirror` and `deleteMirror`?**  
   These are operator-triggered and not currently Temporal workflows. If delete requires remote API + DB atomicity, it should be a Temporal activity for durability.
 
-- **Q3: What happens to video rows when a mirror target is deleted?**  
+- **Q3: What happens to video rows when a Target Account is deleted?**  
   Video rows snapshot `targetId` at upload time — existing rows are unaffected. But whether historical content remains reachable on the now-deleted remote account needs a UX decision.
 
 - **Q4: Multi-target (one creator → multiple targets)?**  
