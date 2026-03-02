@@ -55,6 +55,8 @@ x-dev-volumes: &dev-volumes
   # Firefox profile (named volume) — read-only in all dev containers.
   # Worker reads cookies via FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox
   - firefox_profile:/firefox-profile:ro
+  # WSL2: bind-mount the NVIDIA encode libs from the host WSL layer (no-op on non-WSL2)
+  - /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro
 
 services:
 
@@ -243,6 +245,8 @@ services:
       HTTP_PROXY: http://gluetun:8888
       HTTPS_PROXY: http://gluetun:8888
       NO_PROXY: temporal,postgresql,localhost,127.0.0.1,host.docker.internal
+      # WSL2: libnvidia-encode.so.1 isn't auto-injected by the container toolkit
+      LD_LIBRARY_PATH: /usr/lib/wsl/lib
     volumes: *dev-volumes
     networks: [internal]
     depends_on:
@@ -251,6 +255,14 @@ services:
       gluetun:
         condition: service_healthy
     restart: unless-stopped
+    # GPU reservation — worker runs ffmpeg h264_nvenc; requires NVIDIA Container Toolkit on host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 networks:
   internal:
