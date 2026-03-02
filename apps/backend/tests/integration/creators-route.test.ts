@@ -16,10 +16,11 @@ describe('POST /api/creators', () => {
   let ctx: Awaited<ReturnType<typeof buildTestApp>>;
   let sourceId: number;
   let targetId: number;
+  let mirrorTargetId: number;
 
   beforeEach(async () => {
     ctx = await buildTestApp();
-    ({ sourceId, targetId } = await seedSourceAndTarget(ctx.db));
+    ({ sourceId, targetId, mirrorTargetId } = await seedSourceAndTarget(ctx.db));
   });
 
   afterEach(async () => {
@@ -35,6 +36,7 @@ describe('POST /api/creators', () => {
         handle: '@testcreator',
         sourceId,
         targetId,
+        mirrorTargetId,
       },
     });
 
@@ -58,6 +60,7 @@ describe('POST /api/creators', () => {
         handle: '@optcreator',
         sourceId,
         targetId,
+        mirrorTargetId,
         pollIntervalMs: 60_000,
         maxBacklog: 20,
         initialSyncWindowDays: 7,
@@ -79,7 +82,7 @@ describe('POST /api/creators', () => {
       method: 'POST',
       url: '/api/creators',
       headers: { cookie },
-      payload: { handle: '@dup', sourceId, targetId },
+      payload: { handle: '@dup', sourceId, targetId, mirrorTargetId },
     });
     expect(first.statusCode).toBe(201);
     const createdId = first.json().id;
@@ -89,7 +92,7 @@ describe('POST /api/creators', () => {
       method: 'POST',
       url: '/api/creators',
       headers: { cookie },
-      payload: { handle: '@dup', sourceId, targetId },
+      payload: { handle: '@dup', sourceId, targetId, mirrorTargetId },
     });
 
     expect(second.statusCode).toBe(409);
@@ -124,10 +127,11 @@ describe('GET /api/creators', () => {
   let ctx: Awaited<ReturnType<typeof buildTestApp>>;
   let sourceId: number;
   let targetId: number;
+  let mirrorTargetId: number;
 
   beforeEach(async () => {
     ctx = await buildTestApp();
-    ({ sourceId, targetId } = await seedSourceAndTarget(ctx.db));
+    ({ sourceId, targetId, mirrorTargetId } = await seedSourceAndTarget(ctx.db));
   });
 
   afterEach(async () => {
@@ -153,14 +157,14 @@ describe('GET /api/creators', () => {
       method: 'POST',
       url: '/api/creators',
       headers: { cookie },
-      payload: { handle: '@one', sourceId, targetId },
+      payload: { handle: '@one', sourceId, targetId, mirrorTargetId },
     });
 
     await ctx.app.inject({
       method: 'POST',
       url: '/api/creators',
       headers: { cookie },
-      payload: { handle: '@two', sourceId, targetId },
+      payload: { handle: '@two', sourceId, targetId, mirrorTargetId },
     });
 
     const res = await ctx.app.inject({
@@ -183,7 +187,7 @@ describe('GET /api/creators', () => {
       method: 'POST',
       url: '/api/creators',
       headers: { cookie },
-      payload: { handle: '@fieldcheck', sourceId, targetId },
+      payload: { handle: '@fieldcheck', sourceId, targetId, mirrorTargetId },
     });
 
     const res = await ctx.app.inject({

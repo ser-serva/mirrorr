@@ -119,7 +119,6 @@ services:
   # Port 3002 forwards the Firefox VNC web UI through the Gluetun container.
   # WireGuard config (keys, addresses) comes from .env — see .env.example.
   gluetun:
-    profiles: [dev]
     image: qmcgaw/gluetun:latest
     container_name: mirrorr_dev_gluetun
     restart: unless-stopped
@@ -149,7 +148,6 @@ services:
   # Log in to TikTok once; profile persists in the firefox_profile volume.
   # Then set FIREFOX_PROFILE_PATH=/firefox-profile/.config/mozilla/firefox in .env.
   firefox:
-    profiles: [dev]
     image: lscr.io/linuxserver/firefox:latest
     container_name: mirrorr_dev_firefox
     network_mode: "service:gluetun"
@@ -174,7 +172,6 @@ services:
   # cache hashes).  tsc --watch only watches src/ (per tsconfig "include": ["src"])
   # so it never triggers itself.
   packages-watch:
-    profiles: [dev]
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -203,7 +200,6 @@ services:
   # Fastify API server — tsx hot-reload on apps/backend/src changes.
   # Port 4001 matches the host dev mode so curl commands are identical.
   app:
-    profiles: [dev]
     image: mirrorr:dev
     container_name: mirrorr_dev_app
     working_dir: /app/apps/backend
@@ -232,7 +228,6 @@ services:
   # yt-dlp is installed in the dev image (shared system-tools stage) and matches
   # the same pinned version as the prod worker (ARG YTDLP_VERSION in Dockerfile).
   worker:
-    profiles: [dev]
     image: mirrorr:dev
     container_name: mirrorr_dev_worker
     working_dir: /app/apps/backend

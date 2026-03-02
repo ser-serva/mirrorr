@@ -43,6 +43,9 @@ importers:
       '@mirrorr/adapter-core':
         specifier: workspace:*
         version: link:../../packages/adapter-core
+      '@mirrorr/adapter-loops':
+        specifier: workspace:*
+        version: link:../../packages/adapter-loops
       '@mirrorr/adapter-tiktok':
         specifier: workspace:*
         version: link:../../packages/adapter-tiktok
@@ -145,9 +148,18 @@ importers:
       '@repo/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@types/node':
+        specifier: ^22.19.11
+        version: 22.19.11
+      '@vitest/coverage-v8':
+        specifier: ^4.0.18
+        version: 4.0.18(vitest@4.0.18(@types/node@22.19.11)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
       typescript:
         specifier: 5.9.2
         version: 5.9.2
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.11)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
   packages/adapter-tiktok:
     dependencies:

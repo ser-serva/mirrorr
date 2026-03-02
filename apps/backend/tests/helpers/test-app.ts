@@ -14,6 +14,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as schema from '../../src/db/schema.js';
 import { buildServer } from '../../src/server.js';
+import { encrypt } from '../../src/lib/crypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -52,7 +53,9 @@ export async function buildTestApp() {
 
 /**
  * Seed a minimal source + target row for use in creator tests.
- * Returns { sourceId, targetId }.
+ * Also seeds a mirror target (isMirror=true) so integration tests can skip
+ * the provisioning path by supplying mirrorTargetId in the request body.
+ * Returns { sourceId, targetId, mirrorTargetId }.
  */
 export async function seedSourceAndTarget(db: ReturnType<typeof createTestDb>['db']) {
   const [source] = await db
@@ -66,7 +69,7 @@ export async function seedSourceAndTarget(db: ReturnType<typeof createTestDb>['d
       name: 'Loops',
       type: 'loops',
       url: 'http://localhost:8085',
-      apiTokenEnc: 'test-token-enc',
+      apiTokenEnc: encrypt('test-token'),
       publicationConfig: {},
       config: {},
       isMirror: false,
@@ -74,5 +77,19 @@ export async function seedSourceAndTarget(db: ReturnType<typeof createTestDb>['d
     })
     .returning({ id: schema.targets.id });
 
-  return { sourceId: source!.id, targetId: target!.id };
+  const [mirrorTarget] = await db
+    .insert(schema.targets)
+    .values({
+      name: 'Loops Mirror',
+      type: 'loops',
+      url: 'http://localhost:8085',
+      apiTokenEnc: encrypt('mirror-token'),
+      publicationConfig: {},
+      config: {},
+      isMirror: true,
+      enabled: true,
+    })
+    .returning({ id: schema.targets.id });
+
+  return { sourceId: source!.id, targetId: target!.id, mirrorTargetId: mirrorTarget!.id };
 }

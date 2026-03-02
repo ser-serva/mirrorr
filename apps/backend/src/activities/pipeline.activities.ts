@@ -1,4 +1,4 @@
-import { Context } from '@temporalio/activity';
+import { Context, ApplicationFailure } from '@temporalio/activity';
 import { count, eq } from 'drizzle-orm';
 import { createDb, type Db } from '../db/index.js';
 import * as schema from '../db/schema.js';
@@ -6,7 +6,7 @@ import type { VideoStage } from '../db/schema.js';
 import { emitSseEvent } from '../lib/sse-bus.js';
 import { getTemporalClient } from '../temporal/client.js';
 import { env } from '../env.js';
-import type { SourceAdapter } from '@mirrorr/adapter-core';
+import type { SourceAdapter, TargetAdapter } from '@mirrorr/adapter-core';
 
 /**
  * Activities run in the main Node.js process — they can use any Node.js APIs,
@@ -20,6 +20,7 @@ import type { SourceAdapter } from '@mirrorr/adapter-core';
 
 let _dbFactory: (() => Db) | null = null;
 let _sourceAdapterFactory: ((type: string) => SourceAdapter) | null = null;
+let _targetAdapterFactory: (() => TargetAdapter) | null = null;
 
 /** Override the DB factory (for unit testing activities without file-based SQLite). */
 export function _setDbFactory(factory: (() => Db) | null): void {
@@ -29,6 +30,11 @@ export function _setDbFactory(factory: (() => Db) | null): void {
 /** Override the source adapter factory (for unit testing activities). */
 export function _setSourceAdapterFactory(factory: ((type: string) => SourceAdapter) | null): void {
   _sourceAdapterFactory = factory;
+}
+
+/** Override the target adapter factory (for unit testing activities). */
+export function _setTargetAdapterFactory(factory: (() => TargetAdapter) | null): void {
+  _targetAdapterFactory = factory;
 }
 
 function getDb(): Db {
@@ -43,6 +49,12 @@ async function getSourceAdapterForType(type: string): Promise<SourceAdapter> {
     return new TiktokAdapter();
   }
   throw new Error(`Unknown source adapter type: ${type}`);
+}
+
+async function getTargetAdapter(): Promise<TargetAdapter> {
+  if (_targetAdapterFactory) return _targetAdapterFactory();
+  const { LoopsAdapter } = await import('@mirrorr/adapter-loops');
+  return new LoopsAdapter();
 }
 
 // ── Pipeline activities ────────────────────────────────────────────────────────
@@ -121,7 +133,7 @@ export async function downloadVideo(videoId: number): Promise<DownloadVideoResul
 
     await db
       .update(schema.videos)
-      .set({ transcodeDecision })
+      .set({ transcodeDecision, localPath })
       .where(eq(schema.videos.id, videoId));
 
     return { localPath, transcodeDecision };
@@ -141,7 +153,131 @@ export async function uploadVideo(videoId: number): Promise<void> {
   const log = Context.current().log;
   log.info('uploadVideo start', { videoId });
 
-  // TODO: decrypt target.apiTokenEnc, call target adapter upload(), write targetPostId + targetPostUrl
+  const db = getDb();
+
+  // ── Load video ─────────────────────────────────────────────────────────────
+
+  const [video] = await db
+    .select()
+    .from(schema.videos)
+    .where(eq(schema.videos.id, videoId));
+  if (!video) throw new Error(`Video ${videoId} not found`);
+
+  // ── Idempotency guard ──────────────────────────────────────────────────────
+
+  if (video.stage === 'UPLOAD_SUCCEEDED') {
+    log.info('uploadVideo: already UPLOAD_SUCCEEDED, returning', { videoId });
+    return;
+  }
+
+  // ── Load creator ───────────────────────────────────────────────────────────
+
+  const [creator] = await db
+    .select()
+    .from(schema.creators)
+    .where(eq(schema.creators.id, video.creatorId));
+  if (!creator) throw new Error(`Creator ${video.creatorId} not found`);
+
+  // ── Resolve effective upload target ────────────────────────────────────────
+
+  const effectiveTargetId: number | null = creator.mirrorTargetId ?? creator.targetId ?? null;
+  if (!effectiveTargetId) {
+    throw ApplicationFailure.nonRetryable(
+      'Creator has no upload target configured',
+      'NO_UPLOAD_TARGET',
+    );
+  }
+
+  const [target] = await db
+    .select()
+    .from(schema.targets)
+    .where(eq(schema.targets.id, effectiveTargetId));
+  if (!target) throw new Error(`Target ${effectiveTargetId} not found`);
+
+  // ── Decrypt token & assemble config ───────────────────────────────────────
+
+  const { decrypt } = await import('../lib/crypto.js');
+  const apiToken = decrypt(target.apiTokenEnc);
+
+  const config = {
+    url: target.url,
+    apiToken,
+    titleTemplate: target.publicationConfig?.titleTemplate,
+    descriptionTemplate: target.publicationConfig?.descriptionTemplate,
+    maxVideoMb: target.config?.maxVideoMb ?? 500,
+    minVideoKb: target.config?.minVideoKb ?? 250,
+  };
+
+  // ── Resolve file path ──────────────────────────────────────────────────────
+
+  const filePath = video.transcodedPath ?? video.localPath;
+  if (!filePath) {
+    throw ApplicationFailure.nonRetryable(
+      `Video ${videoId} has no local file path (neither transcodedPath nor localPath is set)`,
+      'FILE_PATH_MISSING',
+    );
+  }
+
+  // ── File size guard ────────────────────────────────────────────────────────
+
+  const { stat, unlink } = await import('node:fs/promises');
+  let fileSize: number;
+  try {
+    const stats = await stat(filePath);
+    fileSize = stats.size;
+  } catch {
+    throw ApplicationFailure.nonRetryable(
+      `Video file not found on disk: ${filePath}`,
+      'FILE_NOT_FOUND',
+    );
+  }
+
+  const minBytes = config.minVideoKb * 1024;
+  if (fileSize < minBytes) {
+    throw ApplicationFailure.nonRetryable(
+      `Video file is too small: ${fileSize} bytes (min ${config.minVideoKb} KB)`,
+      'FILE_TOO_SMALL',
+    );
+  }
+
+  const maxBytes = config.maxVideoMb * 1024 * 1024;
+  if (fileSize > maxBytes) {
+    throw ApplicationFailure.nonRetryable(
+      `Video file is too large: ${fileSize} bytes (max ${config.maxVideoMb} MB)`,
+      'FILE_TOO_LARGE',
+    );
+  }
+
+  // ── Call upload adapter ────────────────────────────────────────────────────
+
+  const targetAdapter = await getTargetAdapter();
+
+  const uploadOptions = {
+    title: video.title ?? undefined,
+    description: video.description ?? undefined,
+    hashtags: video.hashtags ?? undefined,
+  };
+
+  const result = await targetAdapter.upload(config, uploadOptions, filePath);
+
+  // ── Persist result & clean up ──────────────────────────────────────────────
+
+  await db
+    .update(schema.videos)
+    .set({
+      targetPostId: result.postId,
+      targetPostUrl: result.postUrl ?? null,
+    })
+    .where(eq(schema.videos.id, videoId));
+
+  // Delete local file (best-effort)
+  try {
+    await unlink(filePath);
+  } catch (err) {
+    log.warn('uploadVideo: failed to delete local file', { filePath, error: String(err) });
+  }
+
+  log.info('uploadVideo complete', { videoId, postId: result.postId });
 }
 
 export async function cleanupArtifacts(videoId: number): Promise<void> {
@@ -206,12 +342,25 @@ export async function discoverCreatorVideos(
     const existingCount = countRow?.value ?? 0;
 
     // ── Discover ───────────────────────────────────────────────────────────
+    //
+    // adapter.discover() spawns sequential yt-dlp sub-processes through the
+    // VPN proxy — each one can take 20-60s.  Emit a heartbeat every 15 seconds
+    // so Temporal knows the activity is alive for the duration of the call.
 
-    const discoveryResult = await adapter.discover(source.config, {
-      handle: creator.handle,
-      maxBacklog: creator.maxBacklog ?? undefined,
-      maxAgeDays: creator.initialSyncWindowDays ?? undefined,
-    });
+    const heartbeatInterval = setInterval(() => {
+      Context.current().heartbeat({ status: 'discovering', creatorId });
+    }, 15_000);
+
+    let discoveryResult: Awaited<ReturnType<typeof adapter.discover>>;
+    try {
+      discoveryResult = await adapter.discover(source.config, {
+        handle: creator.handle,
+        maxBacklog: creator.maxBacklog ?? undefined,
+        maxAgeDays: creator.initialSyncWindowDays ?? undefined,
+      });
+    } finally {
+      clearInterval(heartbeatInterval);
+    }
 
     let videos = discoveryResult.videos;
 
@@ -247,11 +396,21 @@ export async function discoverCreatorVideos(
         // Start videoPipelineWorkflow for each new video (best-effort)
         try {
           const client = await getTemporalClient();
+          const wfId = `video-${inserted.id}`;
           await client.workflow.start('videoPipelineWorkflow', {
             taskQueue: env.TEMPORAL_TASK_QUEUE,
-            workflowId: `video-${inserted.id}`,
-            args: [{ videoId: inserted.id }],
+            workflowId: wfId,
+            args: [{
+              videoId: inserted.id,
+              retentionDays: 0, // TODO: load from target.config.retentionDays
+              sourcePubAtMs: video.publishedAt?.getTime() ?? null,
+            }],
           });
+          // Persist workflow ID so the video can be signalled, cancelled, or retried later
+          await db
+            .update(schema.videos)
+            .set({ temporalWorkflowId: wfId })
+            .where(eq(schema.videos.id, inserted.id));
         } catch (wfErr) {
           log.warn('Failed to start videoPipelineWorkflow', {
             videoId: inserted.id,

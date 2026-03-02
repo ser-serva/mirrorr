@@ -35,6 +35,7 @@ export type TikTokSourceConfig = {
 
 export type LoopsTargetConfig = {
   maxVideoMb?: number;   // default 500
+  minVideoKb?: number;   // default 250
   retentionDays?: number; // 0 = never archive, default 3
 };
 
@@ -78,6 +79,7 @@ export const creators = sqliteTable('creators', {
   lastDiscoveredAt:         integer('last_discovered_at', { mode: 'timestamp' }),
   lastPollError:            text('last_poll_error'),
   lastPollErrorAt:          integer('last_poll_error_at', { mode: 'timestamp' }),
+  mirrorTargetId:           integer('mirror_target_id').references(() => targets.id),
 }, (t) => [
   uniqueIndex('creators_handle_source_idx').on(t.handle, t.sourceId),
 ]);
@@ -103,6 +105,8 @@ export const videos = sqliteTable('videos', {
   transcodeDecision:   text('transcode_decision', { enum: ['passthrough', 'encode'] }),
   targetPostId:        text('target_post_id'),
   targetPostUrl:       text('target_post_url'),
+  localPath:           text('local_path'),
+  transcodedPath:      text('transcoded_path'),
   temporalWorkflowId:  text('temporal_workflow_id'),
 }, (t) => [
   // Per-creator deduplication: same video ID may appear for different creators

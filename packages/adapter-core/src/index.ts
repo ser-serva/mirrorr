@@ -77,7 +77,7 @@ export interface TargetAdapter {
    * Returns the platform post ID.
    */
   upload(
-    config: TargetConfig,
+    config: unknown,
     options: UploadOptions,
     filePath: string
   ): Promise<UploadResult>;
@@ -85,7 +85,20 @@ export interface TargetAdapter {
   /**
    * Verify connectivity and auth to the target platform.
    */
-  test(config: TargetConfig): Promise<{ ok: boolean; message?: string }>;
+  test(config: unknown): Promise<{ ok: boolean; message?: string }>;
+
+  /**
+   * Optional: provision a dedicated mirror account on the target platform.
+   * Only adapters that support per-creator mirror accounts implement this.
+   *
+   * @returns { mirrorToken, mirrorUsername } for the new account.
+   * @throws If provisioning fails (username taken, auth error, HTTP error).
+   */
+  provisionMirrorAccount?(
+    config: unknown,
+    handle: string,
+    sourceType: string
+  ): Promise<{ mirrorToken: string; mirrorUsername: string }>;
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
